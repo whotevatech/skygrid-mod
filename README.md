@@ -202,26 +202,6 @@ The default whitelist includes a balanced set of vanilla survival blocks:
 
 ---
 
-## 🏗️ Building from Source
-
-**Requirements:** Java 21, IntelliJ IDEA
-
-```bash
-git clone https://github.com/YOUR_USERNAME/skygrid-mod.git
-cd skygrid-mod
-./gradlew build
-```
-
-The compiled jar will be in `build/libs/`.
-
-To launch Minecraft with the mod for testing:
-
-```bash
-./gradlew runClient
-```
-
----
-
 ## 🤝 Contributing
 
 Contributions are welcome! Feel free to:
