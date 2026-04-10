@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "skygrid",
+  "version": "${version}",
+  "name": "Sky Grid",
+  "description": "A modern Sky Grid world generation mod. Generates a grid of random blocks floating in the void.",
+  "authors": [
+    "Joshua"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/skygrid/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.skygrid.SkyGridMod"
+    ]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+  }
+}

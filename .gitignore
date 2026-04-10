@@ -1,0 +1,17 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Minecraft / Fabric run directory (contains downloaded game assets - do not upload!)
+run/
+
+# OS
+.DS_Store
+Thumbs.db
