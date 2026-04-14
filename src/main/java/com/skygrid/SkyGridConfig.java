@@ -145,7 +145,94 @@ public class SkyGridConfig {
         "minecraft:raw_iron_block",
         "minecraft:raw_copper_block",
         "minecraft:raw_gold_block",
-        "minecraft:cactus"
+        "minecraft:cactus",
+
+        // --- Biomes O' Plenty: logs ---
+        "biomesoplenty:fir_log",
+        "biomesoplenty:redwood_log",
+        "biomesoplenty:mahogany_log",
+        "biomesoplenty:jacaranda_log",
+        "biomesoplenty:palm_log",
+        "biomesoplenty:willow_log",
+        "biomesoplenty:dead_log",
+        "biomesoplenty:magic_log",
+        "biomesoplenty:umbran_log",
+        "biomesoplenty:hellbark_log",
+
+        // --- Biomes O' Plenty: leaves ---
+        "biomesoplenty:fir_leaves",
+        "biomesoplenty:redwood_leaves",
+        "biomesoplenty:mahogany_leaves",
+        "biomesoplenty:jacaranda_leaves",
+        "biomesoplenty:palm_leaves",
+        "biomesoplenty:willow_leaves",
+        "biomesoplenty:magic_leaves",
+        "biomesoplenty:umbran_leaves",
+        "biomesoplenty:hellbark_leaves",
+        "biomesoplenty:origin_leaves",
+        "biomesoplenty:flowering_oak_leaves",
+        "biomesoplenty:orange_autumn_leaves",
+        "biomesoplenty:yellow_autumn_leaves",
+        "biomesoplenty:maple_leaves",
+        "biomesoplenty:snowblossom_leaves",
+
+        // --- Biomes O' Plenty: saplings ---
+        "biomesoplenty:fir_sapling",
+        "biomesoplenty:redwood_sapling",
+        "biomesoplenty:mahogany_sapling",
+        "biomesoplenty:jacaranda_sapling",
+        "biomesoplenty:palm_sapling",
+        "biomesoplenty:willow_sapling",
+        "biomesoplenty:magic_sapling",
+        "biomesoplenty:umbran_sapling",
+        "biomesoplenty:hellbark_sapling",
+        "biomesoplenty:origin_sapling",
+        "biomesoplenty:flowering_oak_sapling",
+        "biomesoplenty:orange_autumn_sapling",
+        "biomesoplenty:yellow_autumn_sapling",
+        "biomesoplenty:maple_sapling",
+        "biomesoplenty:snowblossom_sapling",
+
+        // --- Thermal Expansion: ores ---
+        "thermal:tin_ore",
+        "thermal:lead_ore",
+        "thermal:silver_ore",
+        "thermal:nickel_ore",
+        "thermal:platinum_ore",
+        "thermal:apatite_ore",
+        "thermal:cinnabar_ore",
+        "thermal:niter_ore",
+        "thermal:deepslate_tin_ore",
+        "thermal:deepslate_lead_ore",
+        "thermal:deepslate_silver_ore",
+        "thermal:deepslate_nickel_ore",
+        "thermal:deepslate_platinum_ore",
+        "thermal:deepslate_apatite_ore",
+        "thermal:deepslate_cinnabar_ore",
+        "thermal:deepslate_niter_ore",
+
+        // --- Applied Energistics 2: ores ---
+        "ae2:certus_quartz_ore",
+        "ae2:deepslate_certus_quartz_ore",
+
+        // --- Mystical Agriculture: tier 1 seeds (placed on farmland by generator) ---
+        "mysticalagriculture:inferium_seeds",
+        "mysticalagriculture:dirt_seeds",
+        "mysticalagriculture:wood_seeds",
+        "mysticalagriculture:stone_seeds",
+        "mysticalagriculture:nature_seeds",
+        "mysticalagriculture:water_seeds",
+        "mysticalagriculture:coal_seeds",
+
+        // --- Draconic Evolution: ores ---
+        "draconicevolution:draconium_ore",
+        "draconicevolution:deepslate_draconium_ore",
+
+        // --- Extreme Reactors: ores ---
+        "bigreactors:yellorite_ore",
+        "bigreactors:deepslate_yellorite_ore",
+        "bigreactors:anglesite_ore",
+        "bigreactors:benitoite_ore"
     );
 
     // -------------------------------------------------------------------------

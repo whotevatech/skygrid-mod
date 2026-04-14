@@ -190,13 +190,23 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                             state = pool[rand.nextInt(pool.length)];
                         }
 
-                        chunk.setBlockState(mutablePos, state, false);
+                        // Leaves placed during world gen must be persistent so they don't decay
+                        if (state.getBlock() instanceof LeavesBlock) {
+                            state = state.with(LeavesBlock.PERSISTENT, true);
+                        }
 
-                        // Saplings need dirt below them to survive and grow
-                        if (isSapling(state) && y - 1 >= minY) {
-                            mutablePos.set(x, y - 1, z);
+                        // Saplings: place dirt at the grid position, sapling on top
+                        if (isSapling(state) && y + 1 < maxY) {
                             chunk.setBlockState(mutablePos, Blocks.DIRT.getDefaultState(), false);
-                            mutablePos.set(x, y, z); // reset for next iteration
+                            mutablePos.set(x, y + 1, z);
+                            chunk.setBlockState(mutablePos, state, false);
+                        // MA seeds: place farmland at the grid position, seed on top
+                        } else if (needsFarmland(state) && y + 1 < maxY) {
+                            chunk.setBlockState(mutablePos, Blocks.FARMLAND.getDefaultState(), false);
+                            mutablePos.set(x, y + 1, z);
+                            chunk.setBlockState(mutablePos, state, false);
+                        } else {
+                            chunk.setBlockState(mutablePos, state, false);
                         }
                     }
                 }
@@ -322,6 +332,12 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
             || state.isOf(Blocks.AZALEA)
             || state.isOf(Blocks.FLOWERING_AZALEA)
             || state.isOf(Blocks.MANGROVE_PROPAGULE);
+    }
+
+    /** Returns true for Mystical Agriculture seeds, which need farmland placed below them. */
+    private static boolean needsFarmland(BlockState state) {
+        net.minecraft.util.Identifier id = Registries.BLOCK.getId(state.getBlock());
+        return id.getNamespace().equals("mysticalagriculture") && id.getPath().endsWith("_seeds");
     }
 
     // -------------------------------------------------------------------------
