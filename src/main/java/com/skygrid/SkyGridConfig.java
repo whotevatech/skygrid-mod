@@ -12,8 +12,20 @@ import java.util.*;
  *   skygrid.json          — overworld
  *   skygrid_nether.json   — the nether
  *   skygrid_end.json      — the end
+ *
+ * Each block entry in the whitelist/blacklist can be either:
+ *   - A plain string:                 "minecraft:stone"
+ *   - A weighted object:              {"id": "minecraft:diamond_ore", "weight": 1}
+ * Higher weight = more likely to appear. Default weight is 1.
  */
 public class SkyGridConfig {
+
+    // -------------------------------------------------------------------------
+    // BlockEntry — a block ID paired with a spawn weight (minimum 1)
+    // -------------------------------------------------------------------------
+    public record BlockEntry(String id, int weight) {
+        public BlockEntry(String id) { this(id, 1); }
+    }
 
     // -------------------------------------------------------------------------
     // Default overworld whitelist — vanilla survival blocks only
@@ -62,7 +74,7 @@ public class SkyGridConfig {
         "minecraft:bookshelf", "minecraft:crafting_table", "minecraft:furnace",
         "minecraft:glass", "minecraft:amethyst_block",
         "minecraft:raw_iron_block", "minecraft:raw_copper_block", "minecraft:raw_gold_block",
-        "minecraft:cactus",
+        "minecraft:cactus", "minecraft:sugar_cane",
         // --- Biomes O' Plenty: logs ---
         "biomesoplenty:fir_log", "biomesoplenty:redwood_log", "biomesoplenty:mahogany_log",
         "biomesoplenty:jacaranda_log", "biomesoplenty:palm_log", "biomesoplenty:willow_log",
@@ -171,15 +183,23 @@ public class SkyGridConfig {
     // Fields
     // -------------------------------------------------------------------------
     private String mode;
-    private Set<String> blockList;
+    private List<BlockEntry> entries;
 
     public boolean isAllowed(String blockId) {
-        if ("whitelist".equalsIgnoreCase(mode)) return blockList.contains(blockId);
-        return !blockList.contains(blockId);
+        if ("whitelist".equalsIgnoreCase(mode))
+            return entries.stream().anyMatch(e -> e.id().equals(blockId));
+        return entries.stream().noneMatch(e -> e.id().equals(blockId));
     }
 
-    public String getMode()           { return mode; }
-    public Set<String> getBlockList() { return Collections.unmodifiableSet(blockList); }
+    public String getMode()                   { return mode; }
+    public List<BlockEntry> getBlockEntries() { return Collections.unmodifiableList(entries); }
+
+    /** @deprecated Prefer {@link #getBlockEntries()} for weight-aware access. */
+    public Set<String> getBlockList() {
+        Set<String> ids = new LinkedHashSet<>();
+        for (BlockEntry e : entries) ids.add(e.id());
+        return Collections.unmodifiableSet(ids);
+    }
 
     // -------------------------------------------------------------------------
     // Load all three dimension configs
@@ -205,14 +225,15 @@ public class SkyGridConfig {
         }
         SkyGridMod.LOGGER.info("Loading {} config from {}", label, file.getPath());
         SkyGridConfig cfg = loadFrom(file);
-        SkyGridMod.LOGGER.info("SkyGrid {} config: mode={}, {} entries", label, cfg.mode, cfg.blockList.size());
+        SkyGridMod.LOGGER.info("SkyGrid {} config: mode={}, {} entries", label, cfg.mode, cfg.entries.size());
         return cfg;
     }
 
     private static SkyGridConfig createDefault(List<String> defaults) {
         SkyGridConfig cfg = new SkyGridConfig();
         cfg.mode = "whitelist";
-        cfg.blockList = new LinkedHashSet<>(defaults);
+        cfg.entries = new ArrayList<>();
+        for (String id : defaults) cfg.entries.add(new BlockEntry(id));
         return cfg;
     }
 
@@ -221,11 +242,22 @@ public class SkyGridConfig {
             JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
             SkyGridConfig cfg = new SkyGridConfig();
             cfg.mode = json.has("mode") ? json.get("mode").getAsString() : "whitelist";
-            cfg.blockList = new LinkedHashSet<>();
+            cfg.entries = new ArrayList<>();
             String key = "whitelist".equalsIgnoreCase(cfg.mode) ? "whitelist" : "blacklist";
-            if (json.has(key))
-                for (JsonElement el : json.getAsJsonArray(key))
-                    cfg.blockList.add(el.getAsString());
+            if (json.has(key)) {
+                for (JsonElement el : json.getAsJsonArray(key)) {
+                    if (el.isJsonPrimitive()) {
+                        // Plain string — weight defaults to 1
+                        cfg.entries.add(new BlockEntry(el.getAsString()));
+                    } else if (el.isJsonObject()) {
+                        // Weighted object: {"id": "minecraft:stone", "weight": 5}
+                        JsonObject obj = el.getAsJsonObject();
+                        String id = obj.get("id").getAsString();
+                        int weight = obj.has("weight") ? Math.max(1, obj.get("weight").getAsInt()) : 1;
+                        cfg.entries.add(new BlockEntry(id, weight));
+                    }
+                }
+            }
             return cfg;
         } catch (Exception e) {
             SkyGridMod.LOGGER.error("Failed to read config — using defaults. Error: {}", e.getMessage());
@@ -239,10 +271,20 @@ public class SkyGridConfig {
             Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
             JsonObject json = new JsonObject();
             json.addProperty("_comment",
-                "SkyGrid Config — mode: whitelist (only listed blocks spawn) or blacklist (all except listed)");
+                "SkyGrid Config — mode: whitelist (only listed blocks spawn) or blacklist (all except listed). " +
+                "Each entry is either a plain block ID string (weight 1) or {\"id\": \"...\", \"weight\": N}.");
             json.addProperty("mode", cfg.mode);
             JsonArray arr = new JsonArray();
-            for (String id : cfg.blockList) arr.add(id);
+            for (BlockEntry entry : cfg.entries) {
+                if (entry.weight() == 1) {
+                    arr.add(entry.id());
+                } else {
+                    JsonObject obj = new JsonObject();
+                    obj.addProperty("id", entry.id());
+                    obj.addProperty("weight", entry.weight());
+                    arr.add(obj);
+                }
+            }
             json.add(cfg.mode, arr);
             try (Writer writer = new FileWriter(file)) {
                 gson.toJson(json, writer);
