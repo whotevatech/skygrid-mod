@@ -2,9 +2,11 @@ package com.skygrid;
 
 import com.skygrid.world.SkyGridChunkGenerator;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
 import net.minecraft.util.Identifier;
+import net.minecraft.world.World;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,7 +32,14 @@ public class SkyGridMod implements ModInitializer {
 
         LOGGER.info("SkyGrid chunk generator registered successfully.");
 
-        // Register debug commands (/skygrid blocks, /skygrid blocks log)
+        // Place the starter platform the first time the overworld loads
+        ServerWorldEvents.LOAD.register((server, world) -> {
+            if (world.getRegistryKey() == World.OVERWORLD) {
+                SkyGridPlatform.placeIfNeeded(world);
+            }
+        });
+
+        // Register commands (/skygrid blocks, /skygrid reload, etc.)
         SkyGridCommands.register();
     }
 }

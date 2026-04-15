@@ -218,6 +218,9 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                             mutablePos.set(x + 1, y, z);
                             chunk.setBlockState(mutablePos, Blocks.WATER.getDefaultState(), false);
                         }
+                    // Ores → 2% chance of a 2x2x2 or 3x3x3 cluster
+                    } else if (isOre(state) && new Random(hashPos(x, y, z) + 54321L).nextDouble() < 0.02) {
+                        placeCluster(chunk, x, y, z, state, startX, startZ, minY, maxY);
                     } else {
                         chunk.setBlockState(mutablePos, state, false);
                     }
@@ -334,6 +337,34 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
             || state.isOf(Blocks.AZALEA)
             || state.isOf(Blocks.FLOWERING_AZALEA)
             || state.isOf(Blocks.MANGROVE_PROPAGULE);
+    }
+
+    /** Returns true for any ore block — vanilla or modded (matches any block ID ending in _ore or ancient_debris). */
+    private static boolean isOre(BlockState state) {
+        String id = Registries.BLOCK.getId(state.getBlock()).getPath();
+        return id.endsWith("_ore") || id.equals("ancient_debris");
+    }
+
+    /** Places a 2x2x2 or 3x3x3 cluster of the given block centred on (x, y, z), clipped to the chunk. */
+    private static void placeCluster(Chunk chunk, int x, int y, int z, BlockState state,
+                                     int startX, int startZ, int minY, int maxY) {
+        Random clusterRand = new Random(x * 341873128712L + y * 132897987541L + z * 4392818741L + 99999L);
+        int size = clusterRand.nextBoolean() ? 2 : 3; // 2x2x2 or 3x3x3
+        int origin = size == 2 ? 0 : -1;              // 2: starts at corner; 3: centres on grid point
+
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        for (int cx = origin; cx < origin + size; cx++) {
+            for (int cy = origin; cy < origin + size; cy++) {
+                for (int cz = origin; cz < origin + size; cz++) {
+                    int bx = x + cx, by = y + cy, bz = z + cz;
+                    if (bx < startX || bx >= startX + 16) continue;
+                    if (bz < startZ || bz >= startZ + 16) continue;
+                    if (by < minY   || by >= maxY)         continue;
+                    pos.set(bx, by, bz);
+                    chunk.setBlockState(pos, state, false);
+                }
+            }
+        }
     }
 
     private static boolean needsFarmland(BlockState state) {
