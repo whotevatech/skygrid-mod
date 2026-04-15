@@ -17,8 +17,8 @@ public class SkyGridMod implements ModInitializer {
     public void onInitialize() {
         LOGGER.info("SkyGrid Mod loading!");
 
-        // Load config first — the chunk generator uses it when building the block pool
-        SkyGridConfig.load();
+        // Load all dimension configs — overworld, nether, and end each get their own
+        SkyGridConfig.loadAll();
 
         // Register our custom chunk generator so Minecraft knows how to
         // serialize/deserialize it when loading a Sky Grid world.

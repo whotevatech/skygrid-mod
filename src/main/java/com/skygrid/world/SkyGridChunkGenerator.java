@@ -6,14 +6,12 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.block.*;
-import net.minecraft.block.SaplingBlock;
 import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.block.entity.MobSpawnerBlockEntity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.loot.LootTables;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
@@ -30,38 +28,26 @@ import net.minecraft.world.gen.chunk.ChunkGenerator;
 import net.minecraft.world.gen.chunk.VerticalBlockSample;
 import net.minecraft.world.gen.noise.NoiseConfig;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * SkyGridChunkGenerator — places blocks on a 3D grid with configurable spacing.
- *
- * Grid positions: every block where (x % spacing == 0) AND (y % spacing == 0) AND (z % spacing == 0)
- * Each grid position has a small chance to be a mob spawner or a loot chest,
- * otherwise it picks randomly from a large pool of Overworld blocks.
- */
 public class SkyGridChunkGenerator extends ChunkGenerator {
 
     // -------------------------------------------------------------------------
-    // Codec — lets Minecraft save/load this generator to disk
+    // Codec — includes dimension so the generator is saved/loaded correctly
     // -------------------------------------------------------------------------
     public static final MapCodec<SkyGridChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(
         instance -> instance.group(
             BiomeSource.CODEC.fieldOf("biome_source").forGetter(gen -> gen.biomeSource),
-            Codec.INT.optionalFieldOf("grid_spacing", 4).forGetter(gen -> gen.gridSpacing)
+            Codec.INT.optionalFieldOf("grid_spacing", 4).forGetter(gen -> gen.gridSpacing),
+            Codec.STRING.optionalFieldOf("dimension", "overworld").forGetter(gen -> gen.dimension)
         ).apply(instance, SkyGridChunkGenerator::new)
     );
 
     // -------------------------------------------------------------------------
-    // Block pool — built dynamically at runtime from ALL registered blocks,
-    // including blocks added by other installed mods.
+    // Always-excluded technical blocks
     // -------------------------------------------------------------------------
-
-    // Blocks that should never appear in the grid
     private static final Set<Block> EXCLUDED_BLOCKS = Set.of(
         Blocks.AIR, Blocks.VOID_AIR, Blocks.CAVE_AIR,
         Blocks.BARRIER, Blocks.LIGHT, Blocks.STRUCTURE_VOID,
@@ -69,76 +55,81 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
         Blocks.STRUCTURE_BLOCK, Blocks.JIGSAW,
         Blocks.END_PORTAL, Blocks.END_PORTAL_FRAME, Blocks.END_GATEWAY,
         Blocks.NETHER_PORTAL, Blocks.MOVING_PISTON,
-        Blocks.SPAWNER, Blocks.CHEST  // handled separately with special logic
+        Blocks.SPAWNER, Blocks.CHEST
     );
 
-    // Lazily built on first world generation — captures all mod blocks automatically
-    private static volatile BlockState[] dynamicBlockPool = null;
+    // -------------------------------------------------------------------------
+    // Per-dimension block pools — built lazily on first generation
+    // -------------------------------------------------------------------------
+    private static final Map<String, BlockState[]> DIMENSION_POOLS = new ConcurrentHashMap<>();
 
-    /** Public accessor for the debug command. */
+    public static BlockState[] getPublicBlockPool(String dimension) {
+        return DIMENSION_POOLS.get(dimension);
+    }
+
+    /** Legacy accessor for the debug command — returns overworld pool. */
     public static BlockState[] getPublicBlockPool() {
-        return dynamicBlockPool;
+        return DIMENSION_POOLS.get("overworld");
     }
 
-    private static BlockState[] getBlockPool() {
-        if (dynamicBlockPool == null) {
-            synchronized (SkyGridChunkGenerator.class) {
-                if (dynamicBlockPool == null) {
-                    dynamicBlockPool = buildBlockPool();
-                }
-            }
-        }
-        return dynamicBlockPool;
+    /** Clears all cached pools so they rebuild on next generation — called by /skygrid reload. */
+    public static void clearPools() {
+        DIMENSION_POOLS.clear();
     }
 
-    private static BlockState[] buildBlockPool() {
+    private static BlockState[] getBlockPool(String dimension) {
+        return DIMENSION_POOLS.computeIfAbsent(dimension, SkyGridChunkGenerator::buildBlockPool);
+    }
+
+    private static BlockState[] buildBlockPool(String dimension) {
         List<BlockState> pool = new ArrayList<>();
-        SkyGridConfig config = SkyGridConfig.get();
+        SkyGridConfig config = SkyGridConfig.getForDimension(dimension);
 
         for (Block block : Registries.BLOCK) {
-            // Skip always-excluded technical/special blocks
             if (EXCLUDED_BLOCKS.contains(block)) continue;
-
             BlockState state = block.getDefaultState();
             if (state.isAir()) continue;
-
-            // Check against the player-configurable block list
             String blockId = Registries.BLOCK.getId(block).toString();
             if (!config.isAllowed(blockId)) continue;
-
             pool.add(state);
         }
 
-        SkyGridMod.LOGGER.info("SkyGrid block pool built: {}/{} blocks allowed (mode: {}).",
-            pool.size(), Registries.BLOCK.size(), config.getMode());
+        SkyGridMod.LOGGER.info("SkyGrid [{}] block pool: {}/{} blocks (mode: {}).",
+            dimension, pool.size(), Registries.BLOCK.size(), config.getMode());
         return pool.toArray(new BlockState[0]);
     }
 
     // -------------------------------------------------------------------------
-    // Mob types that can appear in spawners
+    // Dimension-specific spawner mobs
     // -------------------------------------------------------------------------
-    private static final EntityType<?>[] SPAWNER_MOBS = {
-        EntityType.ZOMBIE,
-        EntityType.SKELETON,
-        EntityType.SPIDER,
-        EntityType.CAVE_SPIDER,
-        EntityType.CREEPER,
-        EntityType.ENDERMAN,
-        EntityType.WITCH,
-        EntityType.BLAZE,
-        EntityType.SLIME,
-        EntityType.PHANTOM,
-        EntityType.HUSK,
-        EntityType.STRAY,
-        EntityType.DROWNED,
+    private static final EntityType<?>[] OVERWORLD_MOBS = {
+        EntityType.ZOMBIE, EntityType.SKELETON, EntityType.SPIDER, EntityType.CAVE_SPIDER,
+        EntityType.CREEPER, EntityType.ENDERMAN, EntityType.WITCH, EntityType.SLIME,
+        EntityType.PHANTOM, EntityType.HUSK, EntityType.STRAY, EntityType.DROWNED,
         EntityType.SILVERFISH,
     };
 
-    private final int gridSpacing;
+    private static final EntityType<?>[] NETHER_MOBS = {
+        EntityType.BLAZE, EntityType.WITHER_SKELETON, EntityType.ZOMBIFIED_PIGLIN,
+        EntityType.MAGMA_CUBE, EntityType.HOGLIN, EntityType.PIGLIN_BRUTE,
+        EntityType.STRIDER, EntityType.GHAST,
+    };
 
-    public SkyGridChunkGenerator(BiomeSource biomeSource, int gridSpacing) {
+    private static final EntityType<?>[] END_MOBS = {
+        EntityType.ENDERMAN, EntityType.ENDERMAN, EntityType.ENDERMAN, // weighted — more endermen
+        EntityType.ENDERMITE, EntityType.SHULKER,
+    };
+
+    // -------------------------------------------------------------------------
+    // Fields
+    // -------------------------------------------------------------------------
+    private final int gridSpacing;
+    private final String dimension;
+
+    public SkyGridChunkGenerator(BiomeSource biomeSource, int gridSpacing, String dimension) {
         super(biomeSource);
         this.gridSpacing = gridSpacing;
+        this.dimension   = dimension;
     }
 
     @Override
@@ -151,10 +142,8 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
     // -------------------------------------------------------------------------
     @Override
     public CompletableFuture<Chunk> populateNoise(
-            Blender blender,
-            NoiseConfig noiseConfig,
-            StructureAccessor structureAccessor,
-            Chunk chunk) {
+            Blender blender, NoiseConfig noiseConfig,
+            StructureAccessor structureAccessor, Chunk chunk) {
 
         ChunkPos chunkPos = chunk.getPos();
         int startX = chunkPos.getStartX();
@@ -167,47 +156,48 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
         for (int x = startX; x < startX + 16; x++) {
             for (int z = startZ; z < startZ + 16; z++) {
                 for (int y = minY; y < maxY; y++) {
+                    if (x % gridSpacing != 0 || y % gridSpacing != 0 || z % gridSpacing != 0) continue;
 
-                    // Only place a block if this is a grid intersection
-                    if (x % gridSpacing == 0 && y % gridSpacing == 0 && z % gridSpacing == 0) {
-                        mutablePos.set(x, y, z);
+                    mutablePos.set(x, y, z);
+                    Random rand = new Random(hashPos(x, y, z));
+                    double roll = rand.nextDouble();
 
-                        // Deterministic random per position (same world = same grid every time)
-                        Random rand = new Random(hashPos(x, y, z));
-                        double roll = rand.nextDouble();
+                    BlockState state;
+                    if (roll < 0.008) {
+                        state = Blocks.SPAWNER.getDefaultState();
+                    } else if (roll < 0.022) {
+                        state = Blocks.CHEST.getDefaultState();
+                    } else {
+                        BlockState[] pool = getBlockPool(dimension);
+                        state = pool[rand.nextInt(pool.length)];
+                    }
 
-                        BlockState state;
-                        if (roll < 0.008) {
-                            // ~0.8%: mob spawner
-                            state = Blocks.SPAWNER.getDefaultState();
-                        } else if (roll < 0.022) {
-                            // ~1.4%: loot chest
-                            state = Blocks.CHEST.getDefaultState();
-                        } else {
-                            // Everything else: pick a random block from the pool
-                            // (includes blocks from all installed mods)
-                            BlockState[] pool = getBlockPool();
-                            state = pool[rand.nextInt(pool.length)];
-                        }
+                    // Leaves never decay
+                    if (state.getBlock() instanceof LeavesBlock) {
+                        state = state.with(LeavesBlock.PERSISTENT, true);
+                    }
 
-                        // Leaves placed during world gen must be persistent so they don't decay
-                        if (state.getBlock() instanceof LeavesBlock) {
-                            state = state.with(LeavesBlock.PERSISTENT, true);
-                        }
-
-                        // Saplings: place dirt at the grid position, sapling on top
-                        if (isSapling(state) && y + 1 < maxY) {
-                            chunk.setBlockState(mutablePos, Blocks.DIRT.getDefaultState(), false);
-                            mutablePos.set(x, y + 1, z);
-                            chunk.setBlockState(mutablePos, state, false);
-                        // MA seeds: place farmland at the grid position, seed on top
-                        } else if (needsFarmland(state) && y + 1 < maxY) {
-                            chunk.setBlockState(mutablePos, Blocks.FARMLAND.getDefaultState(), false);
-                            mutablePos.set(x, y + 1, z);
-                            chunk.setBlockState(mutablePos, state, false);
-                        } else {
-                            chunk.setBlockState(mutablePos, state, false);
-                        }
+                    // Saplings → dirt below, sapling on top
+                    if (isSapling(state) && y + 1 < maxY) {
+                        chunk.setBlockState(mutablePos, Blocks.DIRT.getDefaultState(), false);
+                        mutablePos.set(x, y + 1, z);
+                        chunk.setBlockState(mutablePos, state, false);
+                    // Nether fungi → matching nylium below, fungus on top
+                    } else if (state.isOf(Blocks.CRIMSON_FUNGUS) && y + 1 < maxY) {
+                        chunk.setBlockState(mutablePos, Blocks.CRIMSON_NYLIUM.getDefaultState(), false);
+                        mutablePos.set(x, y + 1, z);
+                        chunk.setBlockState(mutablePos, state, false);
+                    } else if (state.isOf(Blocks.WARPED_FUNGUS) && y + 1 < maxY) {
+                        chunk.setBlockState(mutablePos, Blocks.WARPED_NYLIUM.getDefaultState(), false);
+                        mutablePos.set(x, y + 1, z);
+                        chunk.setBlockState(mutablePos, state, false);
+                    // MA seeds → farmland below, seed on top
+                    } else if (needsFarmland(state) && y + 1 < maxY) {
+                        chunk.setBlockState(mutablePos, Blocks.FARMLAND.getDefaultState(), false);
+                        mutablePos.set(x, y + 1, z);
+                        chunk.setBlockState(mutablePos, state, false);
+                    } else {
+                        chunk.setBlockState(mutablePos, state, false);
                     }
                 }
             }
@@ -217,40 +207,33 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
     }
 
     // -------------------------------------------------------------------------
-    // Entity population — configure spawners & chest loot tables
+    // Entity population — configure spawners and chest loot
     // -------------------------------------------------------------------------
     @Override
     public void populateEntities(ChunkRegion region) {
         ChunkPos chunkPos = region.getCenterPos();
         int startX = chunkPos.getStartX();
         int startZ = chunkPos.getStartZ();
-
         BlockPos.Mutable pos = new BlockPos.Mutable();
 
         for (int x = startX; x < startX + 16; x++) {
             for (int z = startZ; z < startZ + 16; z++) {
                 for (int y = region.getBottomY(); y < region.getTopY(); y++) {
+                    if (x % gridSpacing != 0 || y % gridSpacing != 0 || z % gridSpacing != 0) continue;
 
-                    if (x % gridSpacing == 0 && y % gridSpacing == 0 && z % gridSpacing == 0) {
-                        pos.set(x, y, z);
-                        BlockState state = region.getBlockState(pos);
+                    pos.set(x, y, z);
+                    BlockState state = region.getBlockState(pos);
 
-                        if (state.isOf(Blocks.SPAWNER)) {
-                            // Assign a random mob type to this spawner
-                            if (region.getBlockEntity(pos) instanceof MobSpawnerBlockEntity spawner) {
-                                Random rand = new Random(hashPos(x, y, z) + 999L);
-                                EntityType<?> mob = SPAWNER_MOBS[rand.nextInt(SPAWNER_MOBS.length)];
-                                spawner.setEntityType(mob, region.getRandom());
-                            }
-
-                        } else if (state.isOf(Blocks.CHEST)) {
-                            // Assign dungeon loot to this chest
-                            if (region.getBlockEntity(pos) instanceof ChestBlockEntity chest) {
-                                // Pick one of several loot tables for variety
-                                Random rand = new Random(hashPos(x, y, z) + 777L);
-                                RegistryKey<net.minecraft.loot.LootTable> lootTable = pickLootTable(rand);
-                                chest.setLootTable(lootTable, hashPos(x, y, z));
-                            }
+                    if (state.isOf(Blocks.SPAWNER)) {
+                        if (region.getBlockEntity(pos) instanceof MobSpawnerBlockEntity spawner) {
+                            Random rand = new Random(hashPos(x, y, z) + 999L);
+                            EntityType<?> mob = pickMob(rand);
+                            spawner.setEntityType(mob, region.getRandom());
+                        }
+                    } else if (state.isOf(Blocks.CHEST)) {
+                        if (region.getBlockEntity(pos) instanceof ChestBlockEntity chest) {
+                            Random rand = new Random(hashPos(x, y, z) + 777L);
+                            chest.setLootTable(pickLootTable(rand), hashPos(x, y, z));
                         }
                     }
                 }
@@ -258,61 +241,57 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
         }
     }
 
-    /** Choose a loot table for a chest based on random roll. */
+    private EntityType<?> pickMob(Random rand) {
+        EntityType<?>[] mobs = switch (dimension) {
+            case "nether" -> NETHER_MOBS;
+            case "end"    -> END_MOBS;
+            default       -> OVERWORLD_MOBS;
+        };
+        return mobs[rand.nextInt(mobs.length)];
+    }
+
     private RegistryKey<net.minecraft.loot.LootTable> pickLootTable(Random rand) {
-        int choice = rand.nextInt(5);
-        return switch (choice) {
-            case 0  -> LootTables.SIMPLE_DUNGEON_CHEST;
-            case 1  -> LootTables.ABANDONED_MINESHAFT_CHEST;
-            case 2  -> LootTables.STRONGHOLD_LIBRARY_CHEST;
-            case 3  -> LootTables.JUNGLE_TEMPLE_CHEST;
-            default -> LootTables.DESERT_PYRAMID_CHEST;
+        return switch (dimension) {
+            case "nether" -> rand.nextInt(2) == 0
+                ? LootTables.NETHER_BRIDGE_CHEST
+                : LootTables.BASTION_TREASURE_CHEST;
+            case "end"    -> LootTables.END_CITY_TREASURE_CHEST;
+            default -> switch (rand.nextInt(5)) {
+                case 0  -> LootTables.SIMPLE_DUNGEON_CHEST;
+                case 1  -> LootTables.ABANDONED_MINESHAFT_CHEST;
+                case 2  -> LootTables.STRONGHOLD_LIBRARY_CHEST;
+                case 3  -> LootTables.JUNGLE_TEMPLE_CHEST;
+                default -> LootTables.DESERT_PYRAMID_CHEST;
+            };
         };
     }
 
     // -------------------------------------------------------------------------
-    // Required overrides — Sky Grid has no surface or noise pass
+    // Required overrides
     // -------------------------------------------------------------------------
 
     @Override
     public void buildSurface(ChunkRegion region, StructureAccessor structures,
-                             NoiseConfig noiseConfig, Chunk chunk) {
-        // Sky Grid: blocks are already placed in populateNoise — nothing more to do here.
-    }
+                             NoiseConfig noiseConfig, Chunk chunk) {}
 
     @Override
     public void carve(ChunkRegion chunkRegion, long seed, NoiseConfig noiseConfig,
                       BiomeAccess biomeAccess, StructureAccessor structureAccessor,
-                      Chunk chunk, GenerationStep.Carver carverStep) {
-        // Sky Grid: no cave carving — everything is already floating in the void.
-    }
+                      Chunk chunk, GenerationStep.Carver carverStep) {}
 
-    @Override
-    public int getSeaLevel() {
-        return 63; // Standard Minecraft sea level
-    }
-
-    @Override
-    public int getWorldHeight() {
-        return 384; // Standard overworld height (-64 to 320)
-    }
-
-    @Override
-    public int getMinimumY() {
-        return -64; // Standard overworld minimum Y
-    }
+    @Override public int getSeaLevel()    { return 63;  }
+    @Override public int getWorldHeight() { return 384; }
+    @Override public int getMinimumY()    { return -64; }
 
     @Override
     public int getHeight(int x, int z, Heightmap.Type heightmap,
                          HeightLimitView world, NoiseConfig noiseConfig) {
-        return world.getBottomY(); // No solid surface, return minimum
+        return world.getBottomY();
     }
 
     @Override
     public VerticalBlockSample getColumnSample(int x, int z,
-                                               HeightLimitView world,
-                                               NoiseConfig noiseConfig) {
-        // Return an all-air column (the grid handles actual block placement)
+                                               HeightLimitView world, NoiseConfig noiseConfig) {
         BlockState[] states = new BlockState[world.getHeight()];
         Arrays.fill(states, Blocks.AIR.getDefaultState());
         return new VerticalBlockSample(world.getBottomY(), states);
@@ -320,12 +299,13 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
 
     @Override
     public void getDebugHudText(List<String> text, NoiseConfig noiseConfig, BlockPos pos) {
-        text.add("Sky Grid | Spacing: " + gridSpacing + " | Pos: " + pos.toShortString());
+        text.add("Sky Grid | Dim: " + dimension + " | Spacing: " + gridSpacing + " | Pos: " + pos.toShortString());
     }
 
     // -------------------------------------------------------------------------
-    // Helper — check if a block is a sapling or plant that needs dirt below it
+    // Helpers
     // -------------------------------------------------------------------------
+
     private static boolean isSapling(BlockState state) {
         return state.getBlock() instanceof SaplingBlock
             || state.isOf(Blocks.BAMBOO)
@@ -334,15 +314,11 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
             || state.isOf(Blocks.MANGROVE_PROPAGULE);
     }
 
-    /** Returns true for Mystical Agriculture seeds, which need farmland placed below them. */
     private static boolean needsFarmland(BlockState state) {
-        net.minecraft.util.Identifier id = Registries.BLOCK.getId(state.getBlock());
+        Identifier id = Registries.BLOCK.getId(state.getBlock());
         return id.getNamespace().equals("mysticalagriculture") && id.getPath().endsWith("_seeds");
     }
 
-    // -------------------------------------------------------------------------
-    // Helper — stable hash for a world position
-    // -------------------------------------------------------------------------
     private long hashPos(int x, int y, int z) {
         return x * 341873128712L + y * 132897987541L + z * 4392818741L ^ 0xDEADBEEFL;
     }

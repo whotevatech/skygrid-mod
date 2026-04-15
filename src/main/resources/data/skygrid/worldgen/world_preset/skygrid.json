@@ -8,28 +8,31 @@
           "type": "minecraft:multi_noise",
           "preset": "minecraft:overworld"
         },
-        "grid_spacing": 4
+        "grid_spacing": 4,
+        "dimension": "overworld"
       }
     },
     "minecraft:the_nether": {
       "type": "minecraft:the_nether",
       "generator": {
-        "type": "minecraft:noise",
+        "type": "skygrid:skygrid",
         "biome_source": {
           "type": "minecraft:multi_noise",
           "preset": "minecraft:nether"
         },
-        "settings": "minecraft:nether"
+        "grid_spacing": 4,
+        "dimension": "nether"
       }
     },
     "minecraft:the_end": {
       "type": "minecraft:the_end",
       "generator": {
-        "type": "minecraft:noise",
+        "type": "skygrid:skygrid",
         "biome_source": {
           "type": "minecraft:the_end"
         },
-        "settings": "minecraft:end"
+        "grid_spacing": 4,
+        "dimension": "end"
       }
     }
   }

@@ -29,8 +29,22 @@ public class SkyGridCommands {
                             .executes(ctx -> listBlocks(ctx.getSource(), true))
                         )
                     )
+                    // /skygrid reload — reload all dimension configs from disk
+                    .then(literal("reload")
+                        .executes(ctx -> reloadConfig(ctx.getSource()))
+                    )
             );
         });
+    }
+
+    private static int reloadConfig(ServerCommandSource source) {
+        SkyGridConfig.loadAll();
+        SkyGridChunkGenerator.clearPools();
+        source.sendFeedback(() -> Text.literal(
+            "§a[SkyGrid] §fAll dimension configs reloaded. Block pools will rebuild on next chunk generation."
+        ), true);
+        SkyGridMod.LOGGER.info("SkyGrid configs reloaded via command.");
+        return 1;
     }
 
     private static int listBlocks(ServerCommandSource source, boolean logOnly) {
