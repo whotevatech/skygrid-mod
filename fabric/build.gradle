@@ -54,9 +54,14 @@ dependencies {
     implementation project(':common')
 }
 
-// Bundle the common classes into the fabric jar
+// Bundle the common CLASSES into the fabric jar.
+//
+// classesDirs only — NOT the full sourceSets.main.output. processResources below
+// already merges common's resources into this module's resource output, so taking
+// the whole output here would add pack.mcmeta, the world preset and the lang file
+// a second time, and Gradle fails the build on duplicate entries.
 tasks.named('jar') {
-    from project(':common').sourceSets.main.output
+    from project(':common').sourceSets.main.output.classesDirs
 }
 
 // Merge :common's resources into this module's own resource output.

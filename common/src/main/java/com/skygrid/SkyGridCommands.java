@@ -8,9 +8,13 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.IdentifierArgument;
+import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -50,6 +54,7 @@ public final class SkyGridCommands {
                 .then(addCommand())
                 .then(removeCommand())
                 .then(weightCommand())
+                .then(tagCommand())
         );
     }
 
@@ -102,6 +107,76 @@ public final class SkyGridCommands {
                             IdentifierArgument.getId(ctx, "block"),
                             IntegerArgumentType.getInteger(ctx, "weight"),
                             dim, Action.WEIGHT)))));
+    }
+
+    // -------------------------------------------------------------------------
+    // tag — add or remove a whole block tag
+    // -------------------------------------------------------------------------
+    private static LiteralArgumentBuilder<CommandSourceStack> tagCommand() {
+        return Commands.literal("tag")
+            .then(Commands.literal("add")
+                .then(Commands.argument("tag", IdentifierArgument.id())
+                    .suggests(SkyGridCommands::suggestBlockTags)
+                    .executes(ctx -> editTag(ctx.getSource(),
+                            IdentifierArgument.getId(ctx, "tag"), 1, "overworld", true))
+                    .then(Commands.argument("weight", IntegerArgumentType.integer(1, 1000))
+                        .executes(ctx -> editTag(ctx.getSource(),
+                                IdentifierArgument.getId(ctx, "tag"),
+                                IntegerArgumentType.getInteger(ctx, "weight"),
+                                "overworld", true))
+                        .then(dimensionArg((src, dim, ctx) -> editTag(src,
+                                IdentifierArgument.getId(ctx, "tag"),
+                                IntegerArgumentType.getInteger(ctx, "weight"),
+                                dim, true))))))
+            .then(Commands.literal("remove")
+                .then(Commands.argument("tag", IdentifierArgument.id())
+                    .suggests(SkyGridCommands::suggestConfiguredTags)
+                    .executes(ctx -> editTag(ctx.getSource(),
+                            IdentifierArgument.getId(ctx, "tag"), 0, "overworld", false))
+                    .then(dimensionArg((src, dim, ctx) -> editTag(src,
+                            IdentifierArgument.getId(ctx, "tag"), 0, dim, false)))));
+    }
+
+    private static int editTag(CommandSourceStack source, Identifier tagId,
+                               int weight, String dimension, boolean add) {
+
+        String stored = "#" + tagId;   // config stores tags with a leading '#'
+        SkyGridConfig config = SkyGridConfig.getForDimension(dimension);
+
+        if (add) {
+            // Warn, but do not block: the tag may belong to a mod added later.
+            TagKey<Block> key = TagKey.create(Registries.BLOCK, tagId);
+            int matched = 0;
+            for (Holder<Block> ignored : BuiltInRegistries.BLOCK.getTagOrEmpty(key)) matched++;
+
+            config.addOrUpdate(stored, weight);
+            config.saveToDisk();
+            SkyGridChunkGenerator.clearPools();
+
+            final int n = matched;
+            source.sendSuccess(() -> Component.literal(
+                "§a[SkyGrid] §fAdded tag §e" + stored + "§f to " + dimension
+              + " (weight " + weight + ") — §e" + n + "§f block(s)"), true);
+            if (matched == 0) {
+                source.sendSuccess(() -> Component.literal(
+                    "§e⚠ That tag currently matches nothing. Kept anyway — it will "
+                  + "apply if a mod defining it is installed later."), false);
+            }
+        } else {
+            if (!config.remove(stored)) {
+                source.sendFailure(Component.literal(
+                    "§c" + stored + " is not in the " + dimension + " pool."));
+                return 0;
+            }
+            config.saveToDisk();
+            SkyGridChunkGenerator.clearPools();
+            source.sendSuccess(() -> Component.literal(
+                "§a[SkyGrid] §fRemoved tag §e" + stored + "§f from " + dimension), true);
+        }
+
+        source.sendSuccess(() -> Component.literal(
+            "§7Applies to newly generated chunks only — existing terrain is unchanged."), false);
+        return 1;
     }
 
     // -------------------------------------------------------------------------
@@ -207,6 +282,25 @@ public final class SkyGridCommands {
             suggestBlocks(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
                           com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
         return SharedSuggestionProvider.suggestResource(BuiltInRegistries.BLOCK.keySet().stream(), builder);
+    }
+
+    /** Every block tag the game knows about. */
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions>
+            suggestBlockTags(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
+                             com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggestResource(
+            BuiltInRegistries.BLOCK.getTags().map(t -> t.key().location()), builder);
+    }
+
+    /** Only tags already in the overworld config. */
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions>
+            suggestConfiguredTags(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
+                                  com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggestResource(
+            SkyGridConfig.getForDimension("overworld").getBlockEntries().stream()
+                .filter(SkyGridConfig.BlockEntry::isTag)
+                .map(e -> Identifier.parse(e.tagId())),
+            builder);
     }
 
     /** Only blocks already in the overworld config — keeps remove/weight lists short. */

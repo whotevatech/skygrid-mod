@@ -7,9 +7,12 @@ import com.skygrid.SkyGridConfig;
 import com.skygrid.SkyGridMod;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.tags.TagKey;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.EntityType;
@@ -37,7 +40,8 @@ import net.minecraft.world.level.storage.loot.LootTable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -129,51 +133,88 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
     }
 
     private static BlockState[] buildBlockPool(String dimension) {
-        List<BlockState> pool = new ArrayList<>();
         SkyGridConfig config = SkyGridConfig.getForDimension(dimension);
+        boolean whitelist = "whitelist".equalsIgnoreCase(config.getMode());
 
-        Map<String, Integer> weightMap = new HashMap<>();
+        // Resolved block -> weight. LinkedHashMap so the pool order stays stable
+        // between rebuilds, which keeps /skygrid blocks output readable.
+        Map<Block, Integer> weights = new LinkedHashMap<>();
+        Set<Block> denied = new HashSet<>();
+        List<String> unresolved = new ArrayList<>();
+        int tagCount = 0, fromTags = 0;
+
+        // ---- Pass 1: tags ----
+        // Expanded first so that an explicit entry for the same block can
+        // override the weight the tag would have given it.
         for (SkyGridConfig.BlockEntry entry : config.getBlockEntries()) {
-            weightMap.put(entry.id(), entry.weight());
+            if (!entry.isTag()) continue;
+            tagCount++;
+
+            Identifier tagId = Identifier.tryParse(entry.tagId());
+            if (tagId == null) { unresolved.add(entry.id()); continue; }
+
+            TagKey<Block> key = TagKey.create(Registries.BLOCK, tagId);
+            int matched = 0;
+            for (Holder<Block> holder : BuiltInRegistries.BLOCK.getTagOrEmpty(key)) {
+                Block block = holder.value();
+                if (whitelist) weights.putIfAbsent(block, entry.weight());
+                else           denied.add(block);
+                matched++;
+            }
+            fromTags += matched;
+            // An empty tag usually means the mod defining it is not installed.
+            if (matched == 0) unresolved.add(entry.id());
         }
 
-        for (Block block : BuiltInRegistries.BLOCK) {
+        // ---- Pass 2: explicit block IDs (override tag-derived weights) ----
+        for (SkyGridConfig.BlockEntry entry : config.getBlockEntries()) {
+            if (entry.isTag()) continue;
+
+            Identifier id = Identifier.tryParse(entry.id());
+            Block block = id == null ? null : BuiltInRegistries.BLOCK.getValue(id);
+            if (block == null) { unresolved.add(entry.id()); continue; }
+
+            if (whitelist) weights.put(block, entry.weight());
+            else           denied.add(block);
+        }
+
+        // ---- Blacklist mode: everything not denied, at weight 1 ----
+        if (!whitelist) {
+            for (Block block : BuiltInRegistries.BLOCK) {
+                if (!denied.contains(block)) weights.put(block, 1);
+            }
+        }
+
+        // ---- Flatten to the weighted pool ----
+        List<BlockState> pool = new ArrayList<>();
+        for (Map.Entry<Block, Integer> e : weights.entrySet()) {
+            Block block = e.getKey();
             if (EXCLUDED_BLOCKS.contains(block)) continue;
             BlockState state = block.defaultBlockState();
             if (state.isAir()) continue;
+            for (int i = Math.max(1, e.getValue()); i > 0; i--) pool.add(state);
+        }
 
-            String blockId = BuiltInRegistries.BLOCK.getKey(block).toString();
-            if (!config.isAllowed(blockId)) continue;
-
-            int weight = weightMap.getOrDefault(blockId, 1);
-            for (int i = 0; i < weight; i++) pool.add(state);
+        if (tagCount > 0) {
+            SkyGridMod.LOGGER.info("SkyGrid [{}] resolved {} tag(s) to {} block entries.",
+                dimension, tagCount, fromTags);
         }
 
         long uniqueBlocks = pool.stream().distinct().count();
         SkyGridMod.LOGGER.info("SkyGrid [{}] block pool: {}/{} unique blocks, {} weighted slots (mode: {}).",
             dimension, uniqueBlocks, BuiltInRegistries.BLOCK.size(), pool.size(), config.getMode());
 
-        // Report config entries that match no registered block. Usually this means
-        // the config lists blocks from a mod that is not installed — harmless, but
-        // it explains why the pool is smaller than the config suggests, which is
-        // otherwise a confusing discrepancy.
-        if ("whitelist".equalsIgnoreCase(config.getMode())) {
-            List<String> missing = new ArrayList<>();
-            for (SkyGridConfig.BlockEntry entry : config.getBlockEntries()) {
-                Identifier id = Identifier.tryParse(entry.id());
-                if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
-                    missing.add(entry.id());
-                }
-            }
-            if (!missing.isEmpty()) {
-                SkyGridMod.LOGGER.info(
-                    "SkyGrid [{}] skipped {} config entries with no registered block "
-                  + "(mod not installed?): {}",
-                    dimension, missing.size(),
-                    missing.size() > 12
-                        ? String.join(", ", missing.subList(0, 12)) + ", …"
-                        : String.join(", ", missing));
-            }
+        // Entries that resolved to nothing — an unknown block, a malformed ID, or
+        // an empty/absent tag. Almost always means a mod isn't installed. Harmless,
+        // but reporting it explains why the pool is smaller than the config looks.
+        if (!unresolved.isEmpty()) {
+            SkyGridMod.LOGGER.info(
+                "SkyGrid [{}] skipped {} config entr{} that resolved to no blocks "
+              + "(mod not installed?): {}",
+                dimension, unresolved.size(), unresolved.size() == 1 ? "y" : "ies",
+                unresolved.size() > 12
+                    ? String.join(", ", unresolved.subList(0, 12)) + ", …"
+                    : String.join(", ", unresolved));
         }
 
         return pool.toArray(new BlockState[0]);

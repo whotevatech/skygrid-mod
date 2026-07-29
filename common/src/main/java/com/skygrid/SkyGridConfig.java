@@ -23,8 +23,21 @@ public class SkyGridConfig {
     // -------------------------------------------------------------------------
     // BlockEntry — a block ID paired with a spawn weight (minimum 1)
     // -------------------------------------------------------------------------
+    /**
+     * One config entry: either a block ID ("minecraft:stone") or a block TAG
+     * ("#minecraft:logs"), paired with a spawn weight.
+     *
+     * Tags expand to every block in them at pool-build time, so they pick up
+     * modded blocks automatically as mods are added or removed.
+     */
     public record BlockEntry(String id, int weight) {
         public BlockEntry(String id) { this(id, 1); }
+
+        /** True for tag entries — those beginning with '#'. */
+        public boolean isTag() { return id.startsWith("#"); }
+
+        /** The tag ID without its leading '#'. Only meaningful when isTag(). */
+        public String tagId() { return isTag() ? id.substring(1) : id; }
     }
 
     // -------------------------------------------------------------------------
