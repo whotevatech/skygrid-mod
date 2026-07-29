@@ -1,0 +1,22 @@
+// ---------------------------------------------------------------------------
+//  common — loader-agnostic core.
+//
+//  Compiled against VANILLA Minecraft with MOJANG OFFICIAL MAPPINGS only.
+//  It must not reference Fabric or NeoForge APIs. Anything loader-specific
+//  goes behind the Services/IPlatformHelper abstraction in com.skygrid.platform.
+//
+//  Versions below verified against upstream maven on 2026-07-29.
+// ---------------------------------------------------------------------------
+plugins {
+    id 'net.neoforged.moddev' version "${moddev_version}"
+}
+
+neoForge {
+    // Vanilla-only (NeoForm) mode: gives us Minecraft with Mojang mappings,
+    // without pulling in the NeoForge loader itself.
+    neoFormVersion = project.neoform_version
+}
+
+dependencies {
+    compileOnly "com.google.code.gson:gson:2.11.0"
+}

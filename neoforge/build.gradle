@@ -1,0 +1,32 @@
+// ---------------------------------------------------------------------------
+//  neoforge — thin loader wrapper around :common
+//
+//  Plugin version must match :common — both read it from gradle.properties.
+// ---------------------------------------------------------------------------
+plugins {
+    id 'net.neoforged.moddev' version "${moddev_version}"
+}
+
+neoForge {
+    version = project.neoforge_version
+
+    runs {
+        client { client() }
+        server { server() }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+            sourceSet project(':common').sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    implementation project(':common')
+}
+
+tasks.named('jar') {
+    from project(':common').sourceSets.main.output
+}

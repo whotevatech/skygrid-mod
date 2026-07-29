@@ -1,0 +1,35 @@
+# --- Gradle ---
+.gradle/
+build/
+*/build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# --- Dev run directories ---
+# These hold generated worlds, logs, and per-run configs. The default configs
+# are produced from SkyGridConfig at runtime, so nothing here is source.
+run/
+*/run/
+runs/
+*/runs/
+
+# --- Loom / ModDevGradle caches ---
+.loom-cache/
+*/loom-cache/
+remappedSrc/
+
+# --- IDE ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+out/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini

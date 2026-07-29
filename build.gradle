@@ -1,0 +1,48 @@
+// Root build — shared config for all modules.
+plugins {
+    id 'java'
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    group = project.mod_group_id
+    version = project.mod_version
+
+    java {
+        toolchain.languageVersion = JavaLanguageVersion.of(21)
+        withSourcesJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.release = 21
+    }
+
+    repositories {
+        mavenCentral()
+        maven { name = 'Fabric';    url = 'https://maven.fabricmc.net/' }
+        maven { name = 'NeoForged'; url = 'https://maven.neoforged.net/releases' }
+    }
+
+    processResources {
+        def expandProps = [
+            'mod_id'                : project.mod_id,
+            'mod_name'              : project.mod_name,
+            'mod_version'           : project.mod_version,
+            'mod_authors'           : project.mod_authors,
+            'mod_license'           : project.mod_license,
+            'mod_description'       : project.mod_description,
+            'minecraft_version'     : project.minecraft_version,
+            'neoforge_version'      : project.neoforge_version,
+            'neoforge_version_range': project.neoforge_version_range,
+            'loader_version_range'  : project.loader_version_range,
+            'fabric_loader_version' : project.fabric_loader_version,
+            'fabric_api_version'    : project.fabric_api_version
+        ]
+        inputs.properties(expandProps)
+        filesMatching(['META-INF/neoforge.mods.toml', 'fabric.mod.json', 'pack.mcmeta']) {
+            expand expandProps
+        }
+    }
+}
