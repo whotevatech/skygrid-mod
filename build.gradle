@@ -9,6 +9,14 @@ subprojects {
     group = project.mod_group_id
     version = project.mod_version
 
+    // Produce release-friendly filenames instead of the Gradle default, which
+    // uses the subproject name and yields useless jars like "fabric-2.0.0.jar".
+    //   skygrid-fabric-1.21.11-2.0.0.jar
+    //   skygrid-neoforge-1.21.11-2.0.0.jar
+    base {
+        archivesName = "${project.mod_id}-${project.name}-${project.minecraft_version}"
+    }
+
     java {
         toolchain.languageVersion = JavaLanguageVersion.of(21)
         withSourcesJar()
@@ -33,7 +41,8 @@ subprojects {
             'mod_authors'           : project.mod_authors,
             'mod_license'           : project.mod_license,
             'mod_description'       : project.mod_description,
-            'minecraft_version'     : project.minecraft_version,
+            'minecraft_version'      : project.minecraft_version,
+            'minecraft_version_range': project.minecraft_version_range,
             'neoforge_version'      : project.neoforge_version,
             'neoforge_version_range': project.neoforge_version_range,
             'loader_version_range'  : project.loader_version_range,
