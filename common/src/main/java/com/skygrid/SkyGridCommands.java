@@ -7,12 +7,12 @@ import com.skygrid.world.SkyGridChunkGenerator;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
-import net.minecraft.commands.arguments.IdentifierArgument;
+import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -39,9 +39,9 @@ public final class SkyGridCommands {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(
             Commands.literal("skygrid")
-                // 1.21.11 replaced integer permission levels with PermissionSet/
-                // PermissionCheck. LEVEL_GAMEMASTERS is the old level 2.
-                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                // 1.21.1 still uses integer permission levels. (1.21.11 replaced
+                // these with PermissionSet/PermissionCheck.) Level 2 = gamemasters.
+                .requires(src -> src.hasPermission(2))
 
                 .then(Commands.literal("blocks")
                     .executes(ctx -> listBlocks(ctx.getSource(), false))
@@ -63,17 +63,17 @@ public final class SkyGridCommands {
     // -------------------------------------------------------------------------
     private static LiteralArgumentBuilder<CommandSourceStack> addCommand() {
         return Commands.literal("add")
-            .then(Commands.argument("block", IdentifierArgument.id())
+            .then(Commands.argument("block", ResourceLocationArgument.id())
                 .suggests(SkyGridCommands::suggestBlocks)
                 .executes(ctx -> edit(ctx.getSource(),
-                        IdentifierArgument.getId(ctx, "block"), 1, "overworld", Action.ADD))
+                        ResourceLocationArgument.getId(ctx, "block"), 1, "overworld", Action.ADD))
                 .then(Commands.argument("weight", IntegerArgumentType.integer(1, 1000))
                     .executes(ctx -> edit(ctx.getSource(),
-                            IdentifierArgument.getId(ctx, "block"),
+                            ResourceLocationArgument.getId(ctx, "block"),
                             IntegerArgumentType.getInteger(ctx, "weight"),
                             "overworld", Action.ADD))
                     .then(dimensionArg((src, dim, ctx) -> edit(src,
-                            IdentifierArgument.getId(ctx, "block"),
+                            ResourceLocationArgument.getId(ctx, "block"),
                             IntegerArgumentType.getInteger(ctx, "weight"),
                             dim, Action.ADD)))));
     }
@@ -83,12 +83,12 @@ public final class SkyGridCommands {
     // -------------------------------------------------------------------------
     private static LiteralArgumentBuilder<CommandSourceStack> removeCommand() {
         return Commands.literal("remove")
-            .then(Commands.argument("block", IdentifierArgument.id())
+            .then(Commands.argument("block", ResourceLocationArgument.id())
                 .suggests(SkyGridCommands::suggestConfiguredBlocks)
                 .executes(ctx -> edit(ctx.getSource(),
-                        IdentifierArgument.getId(ctx, "block"), 0, "overworld", Action.REMOVE))
+                        ResourceLocationArgument.getId(ctx, "block"), 0, "overworld", Action.REMOVE))
                 .then(dimensionArg((src, dim, ctx) -> edit(src,
-                        IdentifierArgument.getId(ctx, "block"), 0, dim, Action.REMOVE))));
+                        ResourceLocationArgument.getId(ctx, "block"), 0, dim, Action.REMOVE))));
     }
 
     // -------------------------------------------------------------------------
@@ -96,15 +96,15 @@ public final class SkyGridCommands {
     // -------------------------------------------------------------------------
     private static LiteralArgumentBuilder<CommandSourceStack> weightCommand() {
         return Commands.literal("weight")
-            .then(Commands.argument("block", IdentifierArgument.id())
+            .then(Commands.argument("block", ResourceLocationArgument.id())
                 .suggests(SkyGridCommands::suggestConfiguredBlocks)
                 .then(Commands.argument("weight", IntegerArgumentType.integer(1, 1000))
                     .executes(ctx -> edit(ctx.getSource(),
-                            IdentifierArgument.getId(ctx, "block"),
+                            ResourceLocationArgument.getId(ctx, "block"),
                             IntegerArgumentType.getInteger(ctx, "weight"),
                             "overworld", Action.WEIGHT))
                     .then(dimensionArg((src, dim, ctx) -> edit(src,
-                            IdentifierArgument.getId(ctx, "block"),
+                            ResourceLocationArgument.getId(ctx, "block"),
                             IntegerArgumentType.getInteger(ctx, "weight"),
                             dim, Action.WEIGHT)))));
     }
@@ -115,29 +115,29 @@ public final class SkyGridCommands {
     private static LiteralArgumentBuilder<CommandSourceStack> tagCommand() {
         return Commands.literal("tag")
             .then(Commands.literal("add")
-                .then(Commands.argument("tag", IdentifierArgument.id())
+                .then(Commands.argument("tag", ResourceLocationArgument.id())
                     .suggests(SkyGridCommands::suggestBlockTags)
                     .executes(ctx -> editTag(ctx.getSource(),
-                            IdentifierArgument.getId(ctx, "tag"), 1, "overworld", true))
+                            ResourceLocationArgument.getId(ctx, "tag"), 1, "overworld", true))
                     .then(Commands.argument("weight", IntegerArgumentType.integer(1, 1000))
                         .executes(ctx -> editTag(ctx.getSource(),
-                                IdentifierArgument.getId(ctx, "tag"),
+                                ResourceLocationArgument.getId(ctx, "tag"),
                                 IntegerArgumentType.getInteger(ctx, "weight"),
                                 "overworld", true))
                         .then(dimensionArg((src, dim, ctx) -> editTag(src,
-                                IdentifierArgument.getId(ctx, "tag"),
+                                ResourceLocationArgument.getId(ctx, "tag"),
                                 IntegerArgumentType.getInteger(ctx, "weight"),
                                 dim, true))))))
             .then(Commands.literal("remove")
-                .then(Commands.argument("tag", IdentifierArgument.id())
+                .then(Commands.argument("tag", ResourceLocationArgument.id())
                     .suggests(SkyGridCommands::suggestConfiguredTags)
                     .executes(ctx -> editTag(ctx.getSource(),
-                            IdentifierArgument.getId(ctx, "tag"), 0, "overworld", false))
+                            ResourceLocationArgument.getId(ctx, "tag"), 0, "overworld", false))
                     .then(dimensionArg((src, dim, ctx) -> editTag(src,
-                            IdentifierArgument.getId(ctx, "tag"), 0, dim, false)))));
+                            ResourceLocationArgument.getId(ctx, "tag"), 0, dim, false)))));
     }
 
-    private static int editTag(CommandSourceStack source, Identifier tagId,
+    private static int editTag(CommandSourceStack source, ResourceLocation tagId,
                                int weight, String dimension, boolean add) {
 
         String stored = "#" + tagId;   // config stores tags with a leading '#'
@@ -212,7 +212,7 @@ public final class SkyGridCommands {
 
     private enum Action { ADD, REMOVE, WEIGHT }
 
-    private static int edit(CommandSourceStack source, Identifier blockId,
+    private static int edit(CommandSourceStack source, ResourceLocation blockId,
                             int weight, String dimension, Action action) {
 
         String id = blockId.toString();
@@ -289,7 +289,7 @@ public final class SkyGridCommands {
             suggestBlockTags(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
                              com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
         return SharedSuggestionProvider.suggestResource(
-            BuiltInRegistries.BLOCK.getTags().map(t -> t.key().location()), builder);
+            BuiltInRegistries.BLOCK.getTags().map(p -> p.getFirst().location()), builder);
     }
 
     /** Only tags already in the overworld config. */
@@ -299,7 +299,7 @@ public final class SkyGridCommands {
         return SharedSuggestionProvider.suggestResource(
             SkyGridConfig.getForDimension("overworld").getBlockEntries().stream()
                 .filter(SkyGridConfig.BlockEntry::isTag)
-                .map(e -> Identifier.parse(e.tagId())),
+                .map(e -> ResourceLocation.parse(e.tagId())),
             builder);
     }
 
@@ -309,7 +309,7 @@ public final class SkyGridCommands {
                                     com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
         return SharedSuggestionProvider.suggestResource(
             SkyGridConfig.getForDimension("overworld").getBlockEntries().stream()
-                .map(e -> Identifier.parse(e.id())),
+                .map(e -> ResourceLocation.parse(e.id())),
             builder);
     }
 

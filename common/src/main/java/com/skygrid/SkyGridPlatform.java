@@ -6,14 +6,13 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.storage.LevelData;
 
 /**
  * Places a 5x5 starter platform at spawn so players don't fall into the void.
  *
- * Note on 1.21.11: getSharedSpawnPos()/setDefaultSpawnPos() no longer exist.
- * Spawn is now a LevelData.RespawnData record (GlobalPos + yaw + pitch), read
- * and written via Level.getRespawnData() / setRespawnData().
+ * 1.21.1 uses the simple spawn API: getSharedSpawnPos() / setDefaultSpawnPos().
+ * (On 1.21.11 this became a LevelData.RespawnData record — see the
+ * multiloader-1.21.11 branch.)
  */
 public final class SkyGridPlatform {
 
@@ -26,8 +25,7 @@ public final class SkyGridPlatform {
         if (level.dimension() != Level.OVERWORLD) return;
         if (!(level.getChunkSource().getGenerator() instanceof SkyGridChunkGenerator)) return;
 
-        LevelData.RespawnData respawn = level.getRespawnData();
-        BlockPos spawn = respawn.globalPos().pos();
+        BlockPos spawn = level.getSharedSpawnPos();
         BlockPos centre = new BlockPos(spawn.getX(), PLATFORM_Y, spawn.getZ());
 
         // Already placed if something is already sitting at the centre.
@@ -44,8 +42,7 @@ public final class SkyGridPlatform {
         }
 
         BlockPos standingOn = centre.above();
-        level.setRespawnData(LevelData.RespawnData.of(
-            Level.OVERWORLD, standingOn, respawn.yaw(), respawn.pitch()));
+        level.setDefaultSpawnPos(standingOn, 0.0F);
 
         SkyGridMod.LOGGER.info("Starter platform placed. Spawn set to {}", standingOn);
     }

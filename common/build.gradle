@@ -18,5 +18,10 @@ neoForge {
 }
 
 dependencies {
-    compileOnly "com.google.code.gson:gson:2.11.0"
+    // No explicit Gson dependency.
+    //
+    // Minecraft already ships Gson and pins it strictly, so declaring our own
+    // version conflicts: 1.21.1 requires strictly 2.10.1, and asking for 2.11.0
+    // fails dependency resolution outright. The version MC provides is on the
+    // compile classpath already, which is all SkyGridConfig needs.
 }

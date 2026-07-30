@@ -9,7 +9,7 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 
 public class SkyGridFabric implements ModInitializer {
@@ -20,7 +20,7 @@ public class SkyGridFabric implements ModInitializer {
 
         Registry.register(
             BuiltInRegistries.CHUNK_GENERATOR,
-            Identifier.fromNamespaceAndPath(SkyGridMod.MOD_ID, "skygrid"),
+            ResourceLocation.fromNamespaceAndPath(SkyGridMod.MOD_ID, "skygrid"),
             SkyGridChunkGenerator.CODEC
         );
         SkyGridMod.LOGGER.info("SkyGrid chunk generator registered (Fabric).");

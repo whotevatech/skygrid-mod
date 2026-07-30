@@ -1,7 +1,6 @@
 {
   "pack": {
     "description": "WT Sky Grid resources",
-    "pack_format": 34,
-    "supported_formats": [34, 9999]
+    "pack_format": 34
   }
 }
