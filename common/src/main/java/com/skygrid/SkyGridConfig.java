@@ -204,6 +204,24 @@ public class SkyGridConfig {
     private String mode;
     private List<BlockEntry> entries;
 
+    /**
+     * Generation chances, as a fraction of grid points. Defaults are deliberately
+     * low: at spacing 4 there are 1536 grid points per chunk, so 0.002 is about
+     * three chests per chunk. The original 0.022 produced twenty-two, which
+     * out-supplied the whole Ex Deorum progression.
+     */
+    private double spawnerChance    = DEFAULT_SPAWNER_CHANCE;
+    private double chestChance      = DEFAULT_CHEST_CHANCE;
+    private double oreClusterChance = DEFAULT_ORE_CLUSTER_CHANCE;
+
+    public static final double DEFAULT_SPAWNER_CHANCE     = 0.0015;
+    public static final double DEFAULT_CHEST_CHANCE       = 0.0020;
+    public static final double DEFAULT_ORE_CLUSTER_CHANCE = 0.0200;
+
+    public double getSpawnerChance()    { return spawnerChance; }
+    public double getChestChance()      { return chestChance; }
+    public double getOreClusterChance() { return oreClusterChance; }
+
     /** File this config was loaded from, so edits can be written back. */
     private File file;
 
@@ -323,6 +341,9 @@ public class SkyGridConfig {
             JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
             SkyGridConfig cfg = new SkyGridConfig();
             cfg.mode = json.has("mode") ? json.get("mode").getAsString() : "whitelist";
+            cfg.spawnerChance    = readChance(json, "spawner_chance",     DEFAULT_SPAWNER_CHANCE);
+            cfg.chestChance      = readChance(json, "chest_chance",       DEFAULT_CHEST_CHANCE);
+            cfg.oreClusterChance = readChance(json, "ore_cluster_chance", DEFAULT_ORE_CLUSTER_CHANCE);
             cfg.entries = new ArrayList<>();
             String key = "whitelist".equalsIgnoreCase(cfg.mode) ? "whitelist" : "blacklist";
             if (json.has(key)) {
@@ -346,6 +367,20 @@ public class SkyGridConfig {
         }
     }
 
+    /** Reads a 0..1 chance, clamped, falling back to the default if absent or malformed. */
+    private static double readChance(JsonObject json, String key, double fallback) {
+        if (!json.has(key)) return fallback;
+        try {
+            double v = json.get(key).getAsDouble();
+            if (v < 0.0) return 0.0;
+            if (v > 1.0) return 1.0;
+            return v;
+        } catch (Exception e) {
+            SkyGridMod.LOGGER.warn("Bad value for {} - using default {}", key, fallback);
+            return fallback;
+        }
+    }
+
     private static void save(SkyGridConfig cfg, File file) {
         try {
             file.getParentFile().mkdirs();
@@ -355,6 +390,9 @@ public class SkyGridConfig {
                 "SkyGrid Config — mode: whitelist (only listed blocks spawn) or blacklist (all except listed). " +
                 "Each entry is either a plain block ID string (weight 1) or {\"id\": \"...\", \"weight\": N}.");
             json.addProperty("mode", cfg.mode);
+            json.addProperty("spawner_chance", cfg.spawnerChance);
+            json.addProperty("chest_chance", cfg.chestChance);
+            json.addProperty("ore_cluster_chance", cfg.oreClusterChance);
             JsonArray arr = new JsonArray();
             for (BlockEntry entry : cfg.entries) {
                 if (entry.weight() == 1) {

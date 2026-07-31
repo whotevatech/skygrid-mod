@@ -97,6 +97,30 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
         ).apply(instance, SkyGridChunkGenerator::new)
     );
 
+    /**
+     * The highest grid layer that still leaves {@code headroom} blocks beneath
+     * the build limit. Used by SkyGridPlatform to sit the spawn pad on the top
+     * of the grid rather than at a hardcoded height.
+     *
+     * Derived rather than hardcoded because grid spacing is configurable and the
+     * Nether has a 128-block column, so 316 is only ever right for the overworld.
+     */
+    public int topGridY(LevelHeightAccessor level, int headroom) {
+        int minY          = level.getMinBuildHeight();
+        int maxYExclusive = level.getMaxBuildHeight();
+
+        int first = firstGridAtOrAfter(minY);
+        if (first >= maxYExclusive) return minY;
+
+        int top = first + ((maxYExclusive - 1 - first) / gridSpacing) * gridSpacing;
+
+        // Step down a layer at a time until the walls fit under the ceiling.
+        while (top + headroom >= maxYExclusive && top - gridSpacing >= minY) {
+            top -= gridSpacing;
+        }
+        return top;
+    }
+
     // -------------------------------------------------------------------------
     // Always-excluded technical blocks
     // -------------------------------------------------------------------------
@@ -274,6 +298,15 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
 
         BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
 
+        // Read the tunables once per chunk rather than once per grid point.
+        // A single roll decides spawner / chest / ordinary block, so the chest
+        // band is the two chances summed — keeping them separate in config means
+        // changing one does not silently shift the other.
+        SkyGridConfig cfg = SkyGridConfig.getForDimension(dimension);
+        double spawnerCutoff    = cfg.getSpawnerChance();
+        double chestCutoff      = spawnerCutoff + cfg.getChestChance();
+        double oreClusterChance = cfg.getOreClusterChance();
+
         for (int x = firstGridAtOrAfter(startX); x < startX + 16; x += gridSpacing) {
             for (int z = firstGridAtOrAfter(startZ); z < startZ + 16; z += gridSpacing) {
                 for (int y = firstGridAtOrAfter(minY); y < maxYExclusive; y += gridSpacing) {
@@ -282,10 +315,10 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                     RandomSource rand = randomAt(randomState, x, y, z);
                     double roll = rand.nextDouble();
 
-                    if (roll < 0.008) {
+                    if (roll < spawnerCutoff) {
                         placeSpawner(chunk, x, y, z, rand);
                         continue;
-                    } else if (roll < 0.022) {
+                    } else if (roll < chestCutoff) {
                         placeChest(chunk, x, y, z, rand);
                         continue;
                     }
@@ -317,7 +350,7 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                     } else if (state.is(Blocks.SUGAR_CANE) && canStack) {
                         stack(chunk, mutablePos, x, y, z, Blocks.SAND.defaultBlockState(), state);
 
-                    } else if (isOre(state) && rand.nextDouble() < 0.02) {
+                    } else if (isOre(state) && rand.nextDouble() < oreClusterChance) {
                         placeCluster(chunk, x, y, z, state, startX, startZ, minY, maxYExclusive, rand);
 
                     } else {
@@ -481,9 +514,18 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
         return id.endsWith("_ore") || id.equals("ancient_debris");
     }
 
+    /**
+     * Blocks that need farmland beneath them.
+     *
+     * Mystical Agriculture's *_seeds are ITEMS; the placed blocks are *_crop
+     * (mysticalagriculture:inferium_crop and friends). Both suffixes are matched
+     * so a config written against either naming still works.
+     */
     private static boolean needsFarmland(BlockState state) {
         ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-        return id.getNamespace().equals("mysticalagriculture") && id.getPath().endsWith("_seeds");
+        if (!id.getNamespace().equals("mysticalagriculture")) return false;
+        String path = id.getPath();
+        return path.endsWith("_crop") || path.endsWith("_seeds");
     }
 
     /** 2x2x2 or 3x3x3 cluster centred on the grid point, clipped to the chunk. */
