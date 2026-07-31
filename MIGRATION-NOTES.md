@@ -47,6 +47,23 @@ behaviour goes behind `com.skygrid.platform.IPlatformHelper`, resolved at runtim
    working copy (saved to `local-uncommitted-edits.patch`), not in origin/main.
    Carried forward into the port.
 
+4. **Starter platform never placed (both branches).** `SkyGridPlatform` guarded
+   with `if (!level.getBlockState(centre).isAir()) return;` at a fixed `Y=64`.
+   64 is a multiple of the default grid spacing, so a grid block is nearly
+   always already sitting there and the guard returned every single time — the
+   platform had never been built in any world, on either branch.
+
+   Two follow-on traps when fixing this, both hit during the 2.2.x work:
+
+   - Testing the *spawn position* instead is no better. Vanilla's own spawn
+     search lands on the topmost grid block unaided (`level.dat` showed
+     `SpawnY 317` with no mod involvement), which is exactly where the pad goes,
+     so that test also self-satisfies on a fresh world.
+   - The working marker is the glass rail at `floorY+2`. That Y is not a
+     multiple of the grid spacing, and the generator only ever writes to grid
+     layers, so nothing natural can occupy it. Weakens at spacing 1 or 2, hence
+     both opposite corners are checked rather than one.
+
 ## Breaking changes for existing worlds
 
 - Seed fix (#1) changes the block layout of any world regenerating new chunks.

@@ -97,6 +97,34 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
         ).apply(instance, SkyGridChunkGenerator::new)
     );
 
+    /**
+     * The highest grid layer that still leaves {@code headroom} blocks beneath
+     * the build limit. Used by SkyGridPlatform to sit the spawn pad on the top
+     * of the grid rather than at a hardcoded height.
+     *
+     * Derived rather than hardcoded because grid spacing is configurable and the
+     * Nether has a 128-block column, so 316 is only ever right for the overworld.
+     *
+     * 1.21.11: LevelHeightAccessor has getMinY() and getHeight() but no getMaxY(),
+     * so the exclusive ceiling is minY + height. On the 1.21.1 branch this reads
+     * getMaxBuildHeight() directly.
+     */
+    public int topGridY(LevelHeightAccessor level, int headroom) {
+        int minY          = level.getMinY();
+        int maxYExclusive = minY + level.getHeight();
+
+        int first = firstGridAtOrAfter(minY);
+        if (first >= maxYExclusive) return minY;
+
+        int top = first + ((maxYExclusive - 1 - first) / gridSpacing) * gridSpacing;
+
+        // Step down a layer at a time until the walls fit under the ceiling.
+        while (top + headroom >= maxYExclusive && top - gridSpacing >= minY) {
+            top -= gridSpacing;
+        }
+        return top;
+    }
+
     // -------------------------------------------------------------------------
     // Always-excluded technical blocks
     // -------------------------------------------------------------------------
@@ -288,6 +316,15 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
 
         BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
 
+        // Read the tunables once per chunk rather than once per grid point.
+        // A single roll decides spawner / chest / ordinary block, so the chest
+        // band is the two chances summed — keeping them separate in config means
+        // changing one does not silently shift the other.
+        SkyGridConfig cfg = SkyGridConfig.getForDimension(dimension);
+        double spawnerCutoff    = cfg.getSpawnerChance();
+        double chestCutoff      = spawnerCutoff + cfg.getChestChance();
+        double oreClusterChance = cfg.getOreClusterChance();
+
         // Step directly between grid positions rather than testing every block.
         // ~64x fewer iterations than the 1.21.1 version at the default spacing.
         for (int x = firstGridAtOrAfter(startX); x < startX + 16; x += gridSpacing) {
@@ -302,10 +339,10 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                     // entities. Creating the BlockEntity is NOT automatic: a chest
                     // without a ChestBlockEntity is invisible (chests are drawn by a
                     // BlockEntityRenderer) and holds nothing.
-                    if (roll < 0.008) {
+                    if (roll < spawnerCutoff) {
                         placeSpawner(chunk, x, y, z, rand);
                         continue;
-                    } else if (roll < 0.022) {
+                    } else if (roll < chestCutoff) {
                         placeChest(chunk, x, y, z, rand);
                         continue;
                     }
@@ -349,7 +386,7 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                         stack(chunk, mutablePos, x, y, z, Blocks.SAND.defaultBlockState(), state);
 
                     // Ores -> 2% chance of a cluster
-                    } else if (isOre(state) && rand.nextDouble() < 0.02) {
+                    } else if (isOre(state) && rand.nextDouble() < oreClusterChance) {
                         placeCluster(chunk, x, y, z, state, startX, startZ, minY, maxYExclusive, rand);
 
                     } else {
