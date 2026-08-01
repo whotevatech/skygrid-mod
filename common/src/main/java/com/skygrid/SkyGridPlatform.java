@@ -10,13 +10,18 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.LevelData;
 
 /**
- * Places the starter platform on the TOP layer of the grid and pins world spawn
- * to it.
+ * Places the starter platform near the top of the grid and pins world spawn to
+ * it.
  *
- * Why the top rather than a fixed height: a player arriving in the middle of the
- * grid is boxed in on all six sides and has to mine out before seeing anything.
- * From the top they get the view, and every direction of travel is downward into
- * the grid, which is where the game is.
+ * Why near the top rather than a fixed height: a player arriving in the middle
+ * of the grid is boxed in on all six sides and has to mine out before seeing
+ * anything. From up here they get the view, and every direction of travel is
+ * downward into the grid, which is where the game is.
+ *
+ * Why one layer DOWN from the very top: the topmost layer leaves only three
+ * blocks between the pad and the build limit, which is not enough to build
+ * anything at spawn. Dropping a single grid layer costs nothing and turns that
+ * into seven.
  *
  * Runs post-worldgen against a real ServerLevel, so unlike the chunk generator it
  * is not confined to a single chunk and can build wherever vanilla put spawn.
@@ -31,8 +36,20 @@ public final class SkyGridPlatform {
     /** 4 gives a 9x9 pad — room for several players to land without crowding. */
     private static final int RADIUS = 4;
 
-    /** Floor, plus two blocks of lip, must fit under the build limit. */
-    private static final int HEADROOM = 3;
+    /**
+     * Blocks of clear air required above the floor. This one constant does three
+     * jobs, which is why changing it moves the whole platform:
+     *
+     *   1. topGridY() steps DOWN a grid layer until floor + HEADROOM fits under
+     *      the build limit. At 5 the top layer (316) no longer fits, so the pad
+     *      lands on the second layer (312) with seven blocks of space above it.
+     *   2. It is how far up the build loop clears, so it also deletes the grid
+     *      layer that would otherwise hang four blocks over the pad.
+     *   3. It guards the setBlock loop against the build ceiling.
+     *
+     * Drop it back to 3 to sit on the very top layer again.
+     */
+    private static final int HEADROOM = 5;
 
     /**
      * Floor is obsidian so the pad survives creepers and cannot be lost by
