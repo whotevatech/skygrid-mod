@@ -1,0 +1,142 @@
+# Post to Discord when a CurseForge project gets a new file.
+#
+# Put this at .github/workflows/curseforge-discord-notify.yml in a repo you own
+# (whotevatech/skygrid-mod is the obvious home).
+#
+# WHY THIS AND NOT AN RSS BOT
+# CurseForge used to serve RSS per project. It no longer does — /rss redirects
+# to the project page on the main site, and the legacy paths return 404. So
+# MonitoRSS, IFTTT, Zapier and every "RSS to Discord" service are dead ends.
+# The REST API is the only supported route, and this polls it.
+#
+# SETUP
+# 1. Get a free CurseForge API key:
+#    https://console.curseforge.com/  →  API Keys
+# 2. Create a Discord webhook per channel:
+#    Channel → Edit Channel → Integrations → Webhooks → New Webhook → Copy URL
+# 3. Add these as repository secrets (Settings → Secrets and variables → Actions):
+#      CURSEFORGE_API_KEY
+#      DISCORD_WEBHOOK_MOD    → your #mod-updates channel
+#      DISCORD_WEBHOOK_PACK   → your #skygrid-updates channel
+#
+# Nothing here needs a server. GitHub runs it free on a schedule.
+
+name: CurseForge → Discord
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub's scheduler is best-effort and can run late
+    # under load, which is fine — this is a notifier, not a deadline.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:        # lets you trigger a run by hand to test
+
+permissions:
+  contents: write           # needed to commit the "last seen" state file
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for new files and post
+        env:
+          CF_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+          WEBHOOK_MOD: ${{ secrets.DISCORD_WEBHOOK_MOD }}
+          WEBHOOK_PACK: ${{ secrets.DISCORD_WEBHOOK_PACK }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, pathlib
+
+          CF_KEY = os.environ["CF_KEY"]
+
+          # projectId, friendly name, webhook env var, public URL
+          PROJECTS = [
+              (1509662, "WT Sky Grid",
+               "WEBHOOK_MOD",
+               "https://www.curseforge.com/minecraft/mc-mods/wt-sky-grid"),
+              (815335,  "WT Endless Sky Adventures: SkyGrid Edition",
+               "WEBHOOK_PACK",
+               "https://www.curseforge.com/minecraft/modpacks/wt-endless-sky-adventures-skygrid-edition"),
+          ]
+
+          STATE = pathlib.Path(".github/cf-notify-state.json")
+          state = json.loads(STATE.read_text()) if STATE.exists() else {}
+
+          def api(url):
+              req = urllib.request.Request(url, headers={
+                  "x-api-key": CF_KEY, "Accept": "application/json"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.load(r)
+
+          def post(webhook, payload):
+              req = urllib.request.Request(
+                  webhook, data=json.dumps(payload).encode(),
+                  headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req, timeout=30).read()
+
+          changed = False
+
+          for pid, name, hook_var, page in PROJECTS:
+              hook = os.environ.get(hook_var)
+              if not hook:
+                  print(f"{name}: no webhook configured, skipping")
+                  continue
+
+              # Newest files first. Release type 1 = release, 2 = beta, 3 = alpha.
+              data = api(f"https://api.curseforge.com/v1/mods/{pid}/files"
+                         f"?pageSize=10&sortField=1&sortOrder=desc")
+              files = [f for f in data.get("data", []) if f.get("releaseType") == 1]
+              if not files:
+                  continue
+
+              newest = files[0]
+              fid = str(newest["id"])
+              key = str(pid)
+
+              # First ever run: record and stay quiet, so enabling this does not
+              # spam the channel with a release everyone already saw.
+              if key not in state:
+                  state[key] = fid
+                  changed = True
+                  print(f"{name}: first run, baselined at {fid}")
+                  continue
+
+              if state[key] == fid:
+                  print(f"{name}: no change")
+                  continue
+
+              versions = ", ".join(newest.get("gameVersions", [])[:6])
+              embed = {
+                  "title": newest.get("displayName") or newest.get("fileName"),
+                  "url": page + "/files/" + fid,
+                  "description": f"A new release of **{name}** is available.",
+                  "color": 0x4A9EFF,
+                  "fields": [
+                      {"name": "Version", "value": versions or "—", "inline": True},
+                      {"name": "Size",
+                       "value": f"{newest.get('fileLength',0)/1048576:.2f} MB",
+                       "inline": True},
+                  ],
+                  "footer": {"text": "CurseForge"},
+              }
+              post(hook, {"embeds": [embed]})
+              print(f"{name}: posted {fid}")
+
+              state[key] = fid
+              changed = True
+
+          if changed:
+              STATE.parent.mkdir(parents=True, exist_ok=True)
+              STATE.write_text(json.dumps(state, indent=1) + "\n")
+          PY
+
+      - name: Remember what we've already announced
+        run: |
+          if [[ -n "$(git status --porcelain .github/cf-notify-state.json)" ]]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .github/cf-notify-state.json
+            git commit -m "chore: update CurseForge notify state [skip ci]"
+            git push
+          fi
