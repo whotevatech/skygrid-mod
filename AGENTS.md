@@ -117,7 +117,32 @@ behaviour — packs ship configs referencing mods the user may not have.
   project. Both are superseded by this repo's two version branches and should be
   archived so nobody — human or agent — reads them as current.
 
-## 7. Working style
+## 7. Working alongside other tools
+
+More than one agent may be editing this repo: Claude Code, Cursor, and a human in
+IntelliJ, sometimes at the same time. Nothing coordinates them, so:
+
+- **One file at a time.** Two agents editing the same file means last write wins,
+  silently, with no warning to either. Different files in the same repo are fine.
+  For genuine parallel work on the same code, use a branch or a `git worktree` —
+  never a second agent in the same checkout.
+- **Commit when you finish a unit of work**, so the next tool sees a clean tree
+  rather than your half-finished edits. Equally, don't start against a dirty tree
+  you didn't make — ask whose changes they are.
+- **`.git/index.lock` will appear and block you.** IntelliJ and Cursor poll git
+  constantly and leave stale locks. If a git command fails with "Unable to create
+  '.git/index.lock': File exists" and no git process is actually running, delete
+  the file and retry. This is routine here, not a sign of corruption.
+- **Never re-type a file's contents from earlier tool output.** It may have been
+  truncated. Edit in place, or read the file again first.
+- **`core.autocrlf` is `true`** in this repo. Viewed from a Linux shell with it
+  unset, every text file appears modified when only the line endings differ — a
+  103-file phantom diff in one of these repos came from exactly that. Check
+  `git diff --ignore-cr-at-eol --shortstat` before believing a large diff.
+- **Don't push on someone's behalf** unless asked. Local commits ahead of origin
+  are normal here and are not a conflict to resolve.
+
+## 8. Working style
 
 Explain the architecture and confirm the approach before writing code. Propose
 structure → confirm → implement. Do not produce a large diff and ask for a review
