@@ -1,10 +1,15 @@
 # 🌐 WT Sky Grid
 
-A modern Sky Grid world generation mod for **Minecraft 1.21.11**, on both **NeoForge** and **Fabric**.
+A modern Sky Grid world generation mod for **Minecraft 1.21.1**, on both **NeoForge** and **Fabric**.
 
 The world is a 3D lattice of single blocks floating in the void — ores, wood, chests, spawners — with nothing between them. Every block counts, and falling is usually fatal.
 
 Inspired by the classic SkyGrid map by SethBling.
+
+> **Branches.** This repository is branch-per-Minecraft-version.
+> `1.21.1` (this branch, the default) and `multiloader-1.21.11` target different
+> Minecraft releases with different APIs — they are not merged into each other.
+> 1.21.1 exists because Create, Mekanism, AE2 and Thermal have not moved past it.
 
 ---
 
@@ -28,9 +33,9 @@ Inspired by the classic SkyGrid map by SethBling.
 
 | | |
 |---|---|
-| Minecraft | 1.21.11 |
+| Minecraft | 1.21.1 |
 | Java | 21+ |
-| **NeoForge** | 21.11.44 or newer |
+| **NeoForge** | 21.1.244 or newer |
 | **Fabric** | Loader 0.19.3+ and [Fabric API](https://modrinth.com/mod/fabric-api) |
 
 [ModMenu](https://modrinth.com/mod/modmenu) is optional on Fabric — it provides the config button. Without it, use `/skygridgui`.
@@ -39,7 +44,7 @@ Inspired by the classic SkyGrid map by SethBling.
 
 ## 📦 Installation
 
-1. Install NeoForge or Fabric for 1.21.11
+1. Install NeoForge or Fabric for 1.21.1
 2. On Fabric, put **Fabric API** in your `mods` folder
 3. Put the Sky Grid jar in `mods`
 4. Launch

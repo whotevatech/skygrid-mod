@@ -1,0 +1,10 @@
+# The Gradle wrapper script must stay LF or it will not run on Linux or CI
+# ("bad interpreter"). The .bat must stay CRLF for Windows.
+gradlew        text eol=lf
+gradlew.bat    text eol=crlf
+*.sh           text eol=lf
+
+# Binaries — never touch these.
+*.jar  binary
+*.png  binary
+*.zip  binary

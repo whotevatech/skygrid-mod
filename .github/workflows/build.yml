@@ -1,0 +1,46 @@
+# Compile both loader modules on every push.
+#
+# This branch targets one Minecraft version; the sibling branch targets another
+# and has its own copy of this file. A green build here says nothing about there.
+
+name: Build
+
+on:
+  push:
+    branches: ["1.21.1", "multiloader-1.21.11"]
+    paths-ignore: ["**.md", ".github/workflows/curseforge-discord-notify.yml"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 21, not 25. Gradle 9.6.1 rejects 25 — see AGENTS.md.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: chmod +x ./gradlew
+
+      - name: Build
+        run: ./gradlew build --stacktrace --no-daemon
+
+      - name: Upload jars
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skygrid-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            fabric/build/libs/*.jar
+            neoforge/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 14

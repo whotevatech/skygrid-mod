@@ -1,43 +1,85 @@
 # Post to Discord when a CurseForge project gets a new file.
 #
-# Put this at .github/workflows/curseforge-discord-notify.yml in a repo you own
-# (whotevatech/skygrid-mod is the obvious home).
-#
 # WHY THIS AND NOT AN RSS BOT
 # CurseForge used to serve RSS per project. It no longer does — /rss redirects
-# to the project page on the main site, and the legacy paths return 404. So
-# MonitoRSS, IFTTT, Zapier and every "RSS to Discord" service are dead ends.
-# The REST API is the only supported route, and this polls it.
+# to the project page and the legacy paths 404. So MonitoRSS, IFTTT, Zapier and
+# every "RSS to Discord" service are dead ends. The REST API is the only
+# supported route, and this polls it.
+#
+# WHY THE STATE LIVES ON A SEPARATE BRANCH
+# This workflow has to remember which release it last announced. It used to
+# commit that file back to the code branch, which meant every release put a
+# "chore: update CurseForge notify state" commit into the source history — four
+# of them had piled up by Sept 2026. The state now lives on an orphan branch
+# called `ci-state`, which holds nothing else. Source history stays clean.
+# The branch is created automatically on first run; you don't need to make it.
+#
+# WHY THIS FILE IS ON THE DEFAULT BRANCH
+# GitHub only schedules `on: schedule` workflows from the repository's DEFAULT
+# branch. That is currently `1.21.1`. A copy on any other branch will never fire
+# on its own. If you ever change the default branch, this file must move with it.
 #
 # SETUP
-# 1. Get a free CurseForge API key:
-#    https://console.curseforge.com/  →  API Keys
-# 2. Create a Discord webhook per channel:
+# 1. CurseForge API key: https://console.curseforge.com/ → API Keys
+# 2. A Discord webhook per channel:
 #    Channel → Edit Channel → Integrations → Webhooks → New Webhook → Copy URL
-# 3. Add these as repository secrets (Settings → Secrets and variables → Actions):
+# 3. Repository secrets (Settings → Secrets and variables → Actions):
 #      CURSEFORGE_API_KEY
-#      DISCORD_WEBHOOK_MOD    → your #mod-updates channel
-#      DISCORD_WEBHOOK_PACK   → your #skygrid-updates channel
-#
-# Nothing here needs a server. GitHub runs it free on a schedule.
+#      DISCORD_WEBHOOK_MOD    → #mod-updates
+#      DISCORD_WEBHOOK_PACK   → #skygrid-updates
 
 name: CurseForge → Discord
 
 on:
   schedule:
-    # Every 15 minutes. GitHub's scheduler is best-effort and can run late
-    # under load, which is fine — this is a notifier, not a deadline.
+    # Every 15 minutes. GitHub's scheduler is best-effort and can run late under
+    # load, which is fine — this is a notifier, not a deadline.
     - cron: "*/15 * * * *"
-  workflow_dispatch:        # lets you trigger a run by hand to test
+  workflow_dispatch:
 
 permissions:
-  contents: write           # needed to commit the "last seen" state file
+  contents: write          # to push the state branch
+
+concurrency:
+  group: cf-notify         # never let two runs race on the state branch
+  cancel-in-progress: false
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Check out code branch
+        uses: actions/checkout@v4
+
+      - name: Check out (or create) the state branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git clone --branch ci-state --single-branch --depth 1 "$URL" ci-state 2>/dev/null; then
+            echo "state branch found"
+          else
+            echo "no state branch yet — creating an orphan one"
+            mkdir ci-state
+            cd ci-state
+            git init -q
+            git checkout -q --orphan ci-state
+            git remote add origin "$URL"
+            # One-time migration: carry over the legacy in-repo state file so
+            # switching to the state branch does not re-announce an old release.
+            if [ -f ../.github/cf-notify-state.json ]; then
+              cp ../.github/cf-notify-state.json cf-notify-state.json
+              echo "migrated legacy state file"
+            fi
+            printf '%s\n' \
+              "State for the CurseForge → Discord notifier." \
+              "" \
+              "Written by .github/workflows/curseforge-discord-notify.yml on the default branch." \
+              "No source code here, and nothing here is built or released. Do not merge this branch." \
+              > README.md
+          fi
 
       - name: Check for new files and post
         env:
@@ -46,9 +88,11 @@ jobs:
           WEBHOOK_PACK: ${{ secrets.DISCORD_WEBHOOK_PACK }}
         run: |
           python3 - <<'PY'
-          import json, os, urllib.request, pathlib
+          import json, os, urllib.request, urllib.error, pathlib, sys
 
-          CF_KEY = os.environ["CF_KEY"]
+          CF_KEY = os.environ.get("CF_KEY")
+          if not CF_KEY:
+              sys.exit("CURSEFORGE_API_KEY is not set")
 
           # projectId, friendly name, webhook env var, public URL
           PROJECTS = [
@@ -60,7 +104,7 @@ jobs:
                "https://www.curseforge.com/minecraft/modpacks/wt-endless-sky-adventures-skygrid-edition"),
           ]
 
-          STATE = pathlib.Path(".github/cf-notify-state.json")
+          STATE = pathlib.Path("ci-state/cf-notify-state.json")
           state = json.loads(STATE.read_text()) if STATE.exists() else {}
 
           def api(url):
@@ -72,7 +116,8 @@ jobs:
           def post(webhook, payload):
               req = urllib.request.Request(
                   webhook, data=json.dumps(payload).encode(),
-                  headers={"Content-Type": "application/json", "User-Agent": "PlayOnNetwork-CurseForge-Notifier/1.0"})
+                  headers={"Content-Type": "application/json",
+                           "User-Agent": "whotevatech-cf-notify/2 (+github-actions)"})
               urllib.request.urlopen(req, timeout=30).read()
 
           changed = False
@@ -83,9 +128,16 @@ jobs:
                   print(f"{name}: no webhook configured, skipping")
                   continue
 
-              # Newest files first. Release type 1 = release, 2 = beta, 3 = alpha.
-              data = api(f"https://api.curseforge.com/v1/mods/{pid}/files"
-                         f"?pageSize=10&sortField=1&sortOrder=desc")
+              # Newest first. Release type 1 = release, 2 = beta, 3 = alpha.
+              try:
+                  data = api(f"https://api.curseforge.com/v1/mods/{pid}/files"
+                             f"?pageSize=10&sortField=1&sortOrder=desc")
+              except urllib.error.URLError as e:
+                  # A transient CurseForge blip should not fail the whole run and
+                  # should not advance state — just try again in 15 minutes.
+                  print(f"{name}: API error {e}, skipping this run")
+                  continue
+
               files = [f for f in data.get("data", []) if f.get("releaseType") == 1]
               if not files:
                   continue
@@ -129,14 +181,20 @@ jobs:
           if changed:
               STATE.parent.mkdir(parents=True, exist_ok=True)
               STATE.write_text(json.dumps(state, indent=1) + "\n")
+              print("state updated")
           PY
 
       - name: Remember what we've already announced
         run: |
-          if [[ -n "$(git status --porcelain .github/cf-notify-state.json)" ]]; then
+          set -euo pipefail
+          cd ci-state
+          if [[ -n "$(git status --porcelain)" ]]; then
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add .github/cf-notify-state.json
-            git commit -m "chore: update CurseForge notify state [skip ci]"
-            git push
+            git add -A
+            git commit -q -m "state: CurseForge notifier"
+            git push -q origin HEAD:ci-state
+            echo "state pushed"
+          else
+            echo "no state change"
           fi
