@@ -32,6 +32,6 @@ public final class SkyGridClientCommands {
     }
 
     public static Component notReadyMessage() {
-        return Component.literal("§c[SkyGrid] Config not loaded yet.");
+        return Component.translatable("command.skygrid.gui.not_ready");
     }
 }

@@ -6,6 +6,7 @@ import com.skygrid.SkyGridPlatform;
 import com.skygrid.world.SkyGridChunkGenerator;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -30,6 +31,8 @@ public class SkyGridFabric implements ModInitializer {
                 SkyGridPlatform.placeIfNeeded(level);
             }
         });
+
+        ServerLifecycleEvents.SERVER_STARTED.register(SkyGridMod::onServerStarted);
 
         CommandRegistrationCallback.EVENT.register(
             (dispatcher, registryAccess, environment) -> SkyGridCommands.register(dispatcher));

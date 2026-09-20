@@ -51,9 +51,13 @@ public class SkyGridConfig {
         "minecraft:mycelium", "minecraft:sand", "minecraft:red_sand",
         "minecraft:gravel", "minecraft:clay", "minecraft:ice",
         "minecraft:packed_ice", "minecraft:blue_ice", "minecraft:snow_block",
-        "minecraft:obsidian",
+        "minecraft:obsidian", "minecraft:moss_block", "minecraft:rooted_dirt",
+        "minecraft:mud", "minecraft:dripstone_block", "minecraft:cobbled_deepslate",
+        "minecraft:smooth_basalt", "minecraft:sculk", "minecraft:budding_amethyst",
+        "minecraft:bee_nest",
         // --- Stone variants ---
         "minecraft:cobblestone", "minecraft:mossy_cobblestone",
+        "minecraft:mossy_stone_bricks",
         "minecraft:andesite", "minecraft:diorite", "minecraft:granite",
         "minecraft:tuff", "minecraft:calcite",
         // --- Ores ---
@@ -222,8 +226,39 @@ public class SkyGridConfig {
     public double getChestChance()      { return chestChance; }
     public double getOreClusterChance() { return oreClusterChance; }
 
+    public boolean setSpawnerChance(double value) {
+        double n = clampChance(value);
+        if (n == spawnerChance) return false;
+        spawnerChance = n;
+        return true;
+    }
+
+    public boolean setChestChance(double value) {
+        double n = clampChance(value);
+        if (n == chestChance) return false;
+        chestChance = n;
+        return true;
+    }
+
+    public boolean setOreClusterChance(double value) {
+        double n = clampChance(value);
+        if (n == oreClusterChance) return false;
+        oreClusterChance = n;
+        return true;
+    }
+
+    private static double clampChance(double v) {
+        if (v < 0.0) return 0.0;
+        if (v > 1.0) return 1.0;
+        return v;
+    }
+
     /** File this config was loaded from, so edits can be written back. */
     private File file;
+
+    /** Preserved so pack comments survive /skygrid add and the editor. */
+    private String fileComment;
+    private String ratesComment;
 
     /** "overworld" / "nether" / "end" — used in command feedback and logs. */
     private String label;
@@ -321,7 +356,7 @@ public class SkyGridConfig {
             return cfg;
         }
         SkyGridMod.LOGGER.info("Loading {} config from {}", label, file.getPath());
-        SkyGridConfig cfg = loadFrom(file);
+        SkyGridConfig cfg = loadFrom(file, defaults);
         cfg.file  = file;
         cfg.label = label;
         SkyGridMod.LOGGER.info("SkyGrid {} config: mode={}, {} entries", label, cfg.mode, cfg.entries.size());
@@ -336,7 +371,7 @@ public class SkyGridConfig {
         return cfg;
     }
 
-    private static SkyGridConfig loadFrom(File file) {
+    private static SkyGridConfig loadFrom(File file, List<String> defaults) {
         try (Reader reader = new FileReader(file)) {
             JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
             SkyGridConfig cfg = new SkyGridConfig();
@@ -344,6 +379,12 @@ public class SkyGridConfig {
             cfg.spawnerChance    = readChance(json, "spawner_chance",     DEFAULT_SPAWNER_CHANCE);
             cfg.chestChance      = readChance(json, "chest_chance",       DEFAULT_CHEST_CHANCE);
             cfg.oreClusterChance = readChance(json, "ore_cluster_chance", DEFAULT_ORE_CLUSTER_CHANCE);
+            if (json.has("_comment") && json.get("_comment").isJsonPrimitive()) {
+                cfg.fileComment = json.get("_comment").getAsString();
+            }
+            if (json.has("_rates_comment") && json.get("_rates_comment").isJsonPrimitive()) {
+                cfg.ratesComment = json.get("_rates_comment").getAsString();
+            }
             cfg.entries = new ArrayList<>();
             String key = "whitelist".equalsIgnoreCase(cfg.mode) ? "whitelist" : "blacklist";
             if (json.has(key)) {
@@ -354,6 +395,7 @@ public class SkyGridConfig {
                     } else if (el.isJsonObject()) {
                         // Weighted object: {"id": "minecraft:stone", "weight": 5}
                         JsonObject obj = el.getAsJsonObject();
+                        if (!obj.has("id")) continue;
                         String id = obj.get("id").getAsString();
                         int weight = obj.has("weight") ? Math.max(1, obj.get("weight").getAsInt()) : 1;
                         cfg.entries.add(new BlockEntry(id, weight));
@@ -362,8 +404,9 @@ public class SkyGridConfig {
             }
             return cfg;
         } catch (Exception e) {
-            SkyGridMod.LOGGER.error("Failed to read config — using defaults. Error: {}", e.getMessage());
-            return createDefault(DEFAULT_OVERWORLD_WHITELIST);
+            SkyGridMod.LOGGER.error("Failed to read {} — using defaults. Error: {}",
+                file.getName(), e.getMessage());
+            return createDefault(defaults);
         }
     }
 
@@ -386,10 +429,12 @@ public class SkyGridConfig {
             file.getParentFile().mkdirs();
             Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
             JsonObject json = new JsonObject();
-            json.addProperty("_comment",
+            json.addProperty("_comment", cfg.fileComment != null ? cfg.fileComment :
                 "SkyGrid Config — mode: whitelist (only listed blocks spawn) or blacklist (all except listed). " +
                 "Each entry is either a plain block ID string (weight 1) or {\"id\": \"...\", \"weight\": N}.");
             json.addProperty("mode", cfg.mode);
+            json.addProperty("_rates_comment", cfg.ratesComment != null ? cfg.ratesComment :
+                "Chance per grid point (0..1). At spacing 4 a full-height overworld chunk has 1536 grid points.");
             json.addProperty("spawner_chance", cfg.spawnerChance);
             json.addProperty("chest_chance", cfg.chestChance);
             json.addProperty("ore_cluster_chance", cfg.oreClusterChance);

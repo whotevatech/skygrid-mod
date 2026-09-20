@@ -61,6 +61,22 @@ You spawn on a small oak platform. Bridge outward carefully — the void is dire
 
 The Nether and End are Sky Grids too, with their own block pools.
 
+### Dedicated servers
+
+Create World is never shown on a dedicated server, so the world type has to be
+set in `server.properties` **before** the world is generated:
+
+```
+level-type=skygrid:skygrid
+```
+
+If you leave this at the default (`minecraft:normal`), the overworld will be
+vanilla terrain. Changing the setting later does **not** convert an existing
+world — you have to delete that world folder and generate again.
+
+On boot the mod logs whether the overworld actually came up as Sky Grid, so a
+wrong `level-type` is obvious in `logs/latest.log`.
+
 ---
 
 ## ⚙️ Configuration
@@ -108,7 +124,7 @@ Open it with **`/skygridgui`**, or the config button:
 - **NeoForge** — Mods screen → WT Sky Grid → config icon
 - **Fabric** — ModMenu → WT Sky Grid → config icon
 
-The editor gives you dimension tabs, a search box that matches block names *and* mod IDs, an "All blocks / In pool" filter, per-block on/off, and `−`/`+` weight controls.
+The editor gives you a dimension selector, a search box that matches block names *and* mod IDs, an "All blocks / In this pool" filter, click-to-add rows, and `−`/`+` weight controls. Hover a name for its block ID.
 
 Changes save immediately.
 
@@ -120,12 +136,15 @@ All require permission level 2 (`LEVEL_GAMEMASTERS`), so single-player needs che
 
 | Command | Description |
 |---|---|
-| `/skygrid blocks` | Pool summary plus the first 50 entries |
-| `/skygrid blocks log` | Dump the full pool to the game log |
+| `/skygrid` | Status, rates, and a command list |
+| `/skygrid blocks [log] [dimension]` | Pool summary (unique blocks + weights). `log` dumps the full list |
 | `/skygrid reload` | Reload all three configs from disk |
 | `/skygrid add <block> [weight] [dimension]` | Add a block, or change its weight |
 | `/skygrid remove <block> [dimension]` | Remove a block |
 | `/skygrid weight <block> <n> [dimension]` | Set a weight |
+| `/skygrid tag add <tag> [weight] [dimension]` | Add every block in a tag |
+| `/skygrid tag remove <tag> [dimension]` | Remove a tag |
+| `/skygrid chance` | Show generation rates (optional: `spawner`/`chest`/`cluster`, a 0–1 value, and a dimension) |
 | `/skygridgui` | Open the editor (client-side) |
 
 `dimension` is optional and defaults to `overworld`. Accepts `overworld`, `nether` or `end`.
@@ -201,6 +220,13 @@ Run the game in a dev environment with:
 ```
 
 ---
+
+## 📈 Upgrading from 2.3.0
+
+2.3.1 is a polish release. Existing worlds and configs keep working. Dedicated
+servers that were already generating as Sky Grid need no change. If a command
+or the editor rewrites a config file, pack `_comment` / `_rates_comment` fields
+are now preserved instead of being replaced.
 
 ## 📈 Upgrading from 1.x
 

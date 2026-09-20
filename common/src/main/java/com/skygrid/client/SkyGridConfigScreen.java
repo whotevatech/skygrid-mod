@@ -2,277 +2,470 @@ package com.skygrid.client;
 
 import com.skygrid.SkyGridConfig;
 import com.skygrid.world.SkyGridChunkGenerator;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.ObjectSelectionList;
+import net.minecraft.client.gui.components.StringWidget;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
+import net.minecraft.client.gui.layouts.LinearLayout;
+import net.minecraft.client.gui.screens.ConfirmLinkScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
 /**
  * Block pool editor.
  *
- * Lives in common because Screen is vanilla API — only the hooks that open it
- * are loader-specific. Never referenced from server-side code paths, so a
- * dedicated server never loads this class.
+ * Built like a vanilla options screen: header + scrollable list + Done.
+ * The list is an {@link ObjectSelectionList}, so scrolling does not rebuild
+ * widgets. Click a row to add or remove; − / + change weight.
  *
- * Scope, deliberately: blocks, weights, and the three dimension pools.
- * Whitelist/blacklist mode is NOT editable here — flipping it silently inverts
- * the meaning of every entry, which is a poor thing to put behind a button.
- * Edit the JSON directly if you need that.
- *
- * Edits write straight to disk and clear the cached pools, so they apply to
- * newly generated chunks. Existing terrain never changes.
+ * Lives in common because Screen is vanilla API. Never referenced from
+ * server-side code paths.
  */
 public class SkyGridConfigScreen extends Screen {
 
     private static final String[] DIMENSIONS = { "overworld", "nether", "end" };
-
-    private static final int ROW_HEIGHT   = 22;
-    // Search box occupies y=50..68, and the scroll hint is drawn at LIST_TOP-12,
-    // so the list has to start at 84 or the two overlap.
-    private static final int LIST_TOP     = 84;
-    private static final int LIST_BOTTOM  = 40;   // distance from screen bottom
+    private static final int ROW_HEIGHT = 28;
+    private static final int COLUMN_WIDTH = 360;
+    private static final int LIST_TOP_PAD = 4;
+    private static final String DISCORD_URL = "https://discord.gg/W3JVE5A29s";
+    private static final String CURSEFORGE_URL = "https://www.curseforge.com/minecraft/mc-mods/wt-sky-grid";
+    private static final String GITHUB_URL = "https://github.com/whotevatech/skygrid-mod";
 
     private final Screen parent;
+    private final HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this, 92, 64);
 
     private String dimension = "overworld";
-    private String filter    = "";
-    private boolean showOnlyEnabled = false;
+    private String filter = "";
+    private boolean showOnlyEnabled = true;
 
-    private int scroll = 0;
-
-    /** Every block id in the registry, sorted. Built once. */
-    private List<String> allBlocks = List.of();
-    /** The rows currently visible after filtering. */
-    private List<String> visible = new ArrayList<>();
+    private List<BlockInfo> allBlocks = List.of();
 
     private EditBox search;
+    private StringWidget poolSummary;
+    private Button doneButton;
+    private BlockList list;
 
     public SkyGridConfigScreen(Screen parent) {
-        super(Component.literal("Sky Grid — Block Pool"));
+        super(Component.translatable("screen.skygrid.config.title"));
         this.parent = parent;
     }
 
     @Override
     protected void init() {
         if (allBlocks.isEmpty()) {
-            List<String> ids = new ArrayList<>();
-            for (Block b : BuiltInRegistries.BLOCK) {
-                ids.add(BuiltInRegistries.BLOCK.getKey(b).toString());
-            }
-            ids.sort(String::compareTo);
-            allBlocks = List.copyOf(ids);
+            allBlocks = collectBlocks();
         }
 
-        int cx = this.width / 2;
+        LinearLayout header = this.layout.addToHeader(LinearLayout.vertical().spacing(6));
+        header.defaultCellSetting().alignHorizontallyCenter();
+        header.addChild(new StringWidget(this.title, this.font));
 
-        // --- dimension tabs ---
-        int tabW = 80;
-        int tabsX = cx - (tabW * DIMENSIONS.length) / 2;
-        for (int i = 0; i < DIMENSIONS.length; i++) {
-            final String dim = DIMENSIONS[i];
-            String label = (dim.equals(dimension) ? "▶ " : "") + capitalise(dim);
-            addRenderableWidget(Button.builder(Component.literal(label), b -> {
-                dimension = dim;
-                scroll = 0;
-                rebuild();
-            }).bounds(tabsX + i * tabW, 26, tabW - 4, 20).build());
-        }
+        int half = (columnWidth() - 8) / 2;
+        LinearLayout controls = LinearLayout.horizontal().spacing(8);
+        controls.addChild(
+            CycleButton.builder((String dim) -> Component.translatable("screen.skygrid.config.dim." + dim))
+                .withValues(DIMENSIONS)
+                .withInitialValue(dimension)
+                .withTooltip(dim -> Tooltip.create(Component.translatable("screen.skygrid.config.dimension.tooltip")))
+                .create(0, 0, half, 20,
+                    Component.translatable("screen.skygrid.config.dimension"),
+                    (button, value) -> {
+                        dimension = value;
+                        refreshList(true);
+                    })
+        );
+        controls.addChild(
+            CycleButton.booleanBuilder(
+                    Component.translatable("screen.skygrid.config.filter.pool"),
+                    Component.translatable("screen.skygrid.config.filter.all"))
+                .withInitialValue(showOnlyEnabled)
+                .displayOnlyValue()
+                .withTooltip(inPool -> Tooltip.create(Component.translatable("screen.skygrid.config.filter.tooltip")))
+                .create(0, 0, half, 20,
+                    Component.translatable("screen.skygrid.config.filter"),
+                    (button, value) -> {
+                        showOnlyEnabled = value;
+                        refreshList(true);
+                    })
+        );
+        header.addChild(controls);
 
-        // --- search ---
-        search = new EditBox(this.font, cx - 160, 50, 220, 18, Component.literal("Search"));
-        search.setHint(Component.literal("Search blocks or mod id…"));
-        search.setMaxLength(128);
-        search.setValue(filter);
-        search.setResponder(s -> {
-            filter = s.toLowerCase(Locale.ROOT);
-            scroll = 0;
-            recomputeVisible();
+        this.search = new EditBox(this.font, 0, 0, columnWidth(), 20,
+            Component.translatable("screen.skygrid.config.search"));
+        this.search.setHint(Component.translatable("screen.skygrid.config.search.hint"));
+        this.search.setMaxLength(128);
+        this.search.setValue(filter);
+        this.search.setCanLoseFocus(true);
+        this.search.setResponder(value -> {
+            filter = value;
+            refreshList(true);
         });
-        addRenderableWidget(search);
+        header.addChild(this.search);
 
-        // --- filter toggle ---
-        addRenderableWidget(Button.builder(
-            Component.literal(showOnlyEnabled ? "In pool" : "All blocks"), b -> {
-                showOnlyEnabled = !showOnlyEnabled;
-                scroll = 0;
-                rebuild();
-            }).bounds(cx + 68, 50, 92, 18).build());
+        this.poolSummary = new StringWidget(columnWidth(), 9, poolSummaryText(), this.font).setColor(0xFF808080);
+        header.addChild(this.poolSummary);
 
-        // --- done ---
-        addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
-            .bounds(cx - 50, this.height - 28, 100, 20).build());
+        int width = columnWidth();
+        int gap = 4;
+        int curseWidth = Math.min(120, width / 3 + 8);
+        int sideWidth = (width - curseWidth - gap * 2) / 2;
 
-        recomputeVisible();
-        buildRowButtons();
+        LinearLayout footer = this.layout.addToFooter(LinearLayout.vertical().spacing(4));
+        footer.defaultCellSetting().alignHorizontallyCenter();
+        LinearLayout links = LinearLayout.horizontal().spacing(gap);
+        links.addChild(linkButton("discord", DISCORD_URL, sideWidth));
+        links.addChild(linkButton("curseforge", CURSEFORGE_URL, curseWidth));
+        links.addChild(linkButton("github", GITHUB_URL, sideWidth));
+        footer.addChild(links);
+        this.doneButton = Button.builder(CommonComponents.GUI_DONE, button -> onClose()).width(200).build();
+        footer.addChild(this.doneButton);
+
+        this.list = this.addRenderableWidget(new BlockList(this.minecraft, columnWidth(), this.height, 0, ROW_HEIGHT));
+        this.layout.visitWidgets(this::addRenderableWidget);
+        this.repositionElements();
+        refreshList(false);
+        this.search.setFocused(false);
+        this.setFocused(this.list);
     }
 
-    /** Full re-init, used when the row set changes shape. */
-    private void rebuild() {
-        this.rebuildWidgets();
+    private int columnWidth() {
+        return Math.min(COLUMN_WIDTH, Math.max(280, this.width - 40));
     }
 
-    private void recomputeVisible() {
-        SkyGridConfig cfg = SkyGridConfig.getForDimension(dimension);
-        List<String> out = new ArrayList<>();
-        for (String id : allBlocks) {
-            if (!filter.isEmpty() && !id.toLowerCase(Locale.ROOT).contains(filter)) continue;
-            if (showOnlyEnabled && !cfg.contains(id)) continue;
-            out.add(id);
+    private Button linkButton(String key, String url, int width) {
+        return Button.builder(Component.translatable("screen.skygrid.config.link." + key),
+                ConfirmLinkScreen.confirmLink(this, url, true))
+            .width(width)
+            .tooltip(Tooltip.create(Component.translatable("screen.skygrid.config.link.tooltip", url)))
+            .build();
+    }
+
+    @Override
+    protected void repositionElements() {
+        this.layout.arrangeElements();
+        int width = columnWidth();
+        int x = (this.width - width) / 2;
+        if (this.search != null) {
+            this.search.setWidth(width);
+            this.search.setX(x);
         }
-        visible = out;
-        clampScroll();
+        if (this.list != null) {
+            int inner = this.layout.getContentHeight() - LIST_TOP_PAD;
+            int rows = Math.max(1, inner / ROW_HEIGHT);
+            int height = rows * ROW_HEIGHT + LIST_TOP_PAD;
+            this.list.updateSizeAndPosition(width, height, this.layout.getHeaderHeight());
+            this.list.setX(x);
+        }
     }
 
-    private int rowsThatFit() {
-        return Math.max(1, (this.height - LIST_TOP - LIST_BOTTOM) / ROW_HEIGHT);
-    }
-
-    private void clampScroll() {
-        int max = Math.max(0, visible.size() - rowsThatFit());
-        if (scroll > max) scroll = max;
-        if (scroll < 0)   scroll = 0;
-    }
-
-    /**
-     * Buttons for the visible window. Rebuilt whenever the window moves, since
-     * vanilla widgets are positional rather than virtualised.
-     */
-    private void buildRowButtons() {
+    private void refreshList(boolean resetScroll) {
+        if (this.list == null) return;
+        double scroll = resetScroll ? 0.0 : this.list.getScrollAmount();
         SkyGridConfig cfg = SkyGridConfig.getForDimension(dimension);
-        int cx = this.width / 2;
-        int rows = Math.min(rowsThatFit(), Math.max(0, visible.size() - scroll));
+        String query = filter.trim().toLowerCase(Locale.ROOT);
 
-        for (int i = 0; i < rows; i++) {
-            final String id = visible.get(scroll + i);
-            int y = LIST_TOP + i * ROW_HEIGHT;
-            boolean in = cfg.contains(id);
+        List<BlockRow> inPool = new ArrayList<>();
+        List<BlockRow> outOfPool = new ArrayList<>();
+        for (BlockInfo info : allBlocks) {
+            if (!query.isEmpty() && !info.matches(query)) continue;
+            BlockRow row = new BlockRow(info);
+            if (cfg.contains(info.id)) inPool.add(row);
+            else if (!showOnlyEnabled) outOfPool.add(row);
+        }
+        List<BlockRow> rows = new ArrayList<>(inPool.size() + outOfPool.size());
+        rows.addAll(inPool);
+        rows.addAll(outOfPool);
+        this.list.setRows(rows);
+        this.list.setScrollAmount(scroll);
+        if (this.poolSummary != null) {
+            this.poolSummary.setMessage(poolSummaryText());
+        }
+    }
 
-            // toggle in/out of the pool
-            addRenderableWidget(Button.builder(
-                Component.literal(in ? "§aOn" : "§7Off"), b -> {
-                    SkyGridConfig c = SkyGridConfig.getForDimension(dimension);
-                    if (c.contains(id)) c.remove(id);
-                    else                c.addOrUpdate(id, 1);
-                    commit(c);
-                    rebuild();
-                }).bounds(cx - 168, y, 34, 20).build());
+    private Component poolSummaryText() {
+        return Component.translatable("screen.skygrid.config.hint",
+            config().getBlockEntries().size(),
+            Component.translatable("screen.skygrid.config.dim." + dimension));
+    }
 
-            if (in) {
-                int w = cfg.getWeight(id);
-                // weight down
-                addRenderableWidget(Button.builder(Component.literal("−"), b -> {
-                    SkyGridConfig c = SkyGridConfig.getForDimension(dimension);
-                    int nw = Math.max(1, c.getWeight(id) - 1);
-                    c.addOrUpdate(id, nw);
-                    commit(c);
-                    rebuild();
-                }).bounds(cx + 96, y, 20, 20).build());
-
-                // weight up
-                addRenderableWidget(Button.builder(Component.literal("+"), b -> {
-                    SkyGridConfig c = SkyGridConfig.getForDimension(dimension);
-                    c.addOrUpdate(id, Math.min(1000, c.getWeight(id) + 1));
-                    commit(c);
-                    rebuild();
-                }).bounds(cx + 148, y, 20, 20).build());
+    private static List<BlockInfo> collectBlocks() {
+        List<BlockInfo> infos = new ArrayList<>();
+        for (Block block : BuiltInRegistries.BLOCK) {
+            ResourceLocation key = BuiltInRegistries.BLOCK.getKey(block);
+            String id = key.toString();
+            Component name = block.getName();
+            ItemStack icon = new ItemStack(block.asItem());
+            if (icon.isEmpty() && block != Blocks.AIR) {
+                icon = ItemStack.EMPTY;
             }
+            infos.add(new BlockInfo(id, key.getNamespace(), name, icon,
+                name.getString().toLowerCase(Locale.ROOT)));
         }
+        infos.sort(Comparator
+            .comparingInt((BlockInfo b) -> b.namespace.equals("minecraft") ? 0 : 1)
+            .thenComparing(b -> b.namespace)
+            .thenComparing(b -> b.name.getString(), String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(b -> b.id));
+        return List.copyOf(infos);
     }
 
-    /** Persist and invalidate the generator's cached pools. */
+    private SkyGridConfig config() {
+        return SkyGridConfig.getForDimension(dimension);
+    }
+
     private void commit(SkyGridConfig cfg) {
         cfg.saveToDisk();
         SkyGridChunkGenerator.clearPools();
-    }
-
-    @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
-        super.render(g, mouseX, mouseY, partial);
-
-        int cx = this.width / 2;
-        g.drawCenteredString(this.font, this.title, cx, 12, 0xFFFFFFFF);
-
-        SkyGridConfig cfg = SkyGridConfig.getForDimension(dimension);
-        int rows = Math.min(rowsThatFit(), Math.max(0, visible.size() - scroll));
-
-        for (int i = 0; i < rows; i++) {
-            String id = visible.get(scroll + i);
-            int y = LIST_TOP + i * ROW_HEIGHT + 6;
-            boolean in = cfg.contains(id);
-
-            // NOTE: colours must be full ARGB. A 6-digit literal like 0xFFFFFF
-            // has an alpha byte of 0 and renders completely invisible.
-            g.drawString(this.font, id, cx - 126, y, in ? 0xFFFFFFFF : 0xFF909090);
-
-            if (in) {
-                g.drawString(this.font, "w:" + cfg.getWeight(id), cx + 120, y, 0xFFFFD700);
-            }
-        }
-
-        // status line
-        String status = visible.size() + " shown  ·  "
-            + cfg.getBlockEntries().size() + " in " + dimension + " pool"
-            + "  ·  mode: " + cfg.getMode();
-        g.drawCenteredString(this.font, status, cx, this.height - 40, 0xFFA0A0A0);
-
-        if (visible.isEmpty()) {
-            g.drawCenteredString(this.font, "No blocks match that search.",
-                cx, LIST_TOP + 20, 0xFFFF7070);
-        }
-
-        // scroll hint
-        int max = Math.max(0, visible.size() - rowsThatFit());
-        if (max > 0) {
-            g.drawCenteredString(this.font,
-                "scroll  " + (scroll + 1) + "–" + (scroll + rows) + " of " + visible.size(),
-                cx, LIST_TOP - 12, 0xFF707070);
+        if (this.poolSummary != null) {
+            this.poolSummary.setMessage(poolSummaryText());
         }
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        int max = Math.max(0, visible.size() - rowsThatFit());
-        if (max > 0) {
-            int before = scroll;
-            scroll -= (int) Math.signum(scrollY) * 3;
-            clampScroll();
-            if (scroll != before) {
-                rebuild();
-                return true;
-            }
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        super.render(graphics, mouseX, mouseY, partialTick);
+
+        if (this.list != null && this.list.children().isEmpty()) {
+            graphics.drawCenteredString(this.font,
+                Component.translatable("screen.skygrid.config.empty"),
+                this.width / 2,
+                this.layout.getHeaderHeight() + this.layout.getContentHeight() / 2,
+                0xFFAAAAAA);
         }
-        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
     public void onClose() {
-        // Everything is already saved on each edit; nothing to flush here.
         this.minecraft.setScreen(parent);
     }
 
-    private static String capitalise(String s) {
-        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
-    }
-
-    /** Convenience for the loader hooks and the client command. */
     public static Screen create(Screen parent) {
         return new SkyGridConfigScreen(parent);
     }
 
-    /** Guard used by the client command — config must be loaded first. */
     public static boolean isReady() {
         try {
             SkyGridConfig.get();
             return true;
         } catch (IllegalStateException e) {
             return false;
+        }
+    }
+
+    private record BlockInfo(String id, String namespace, Component name, ItemStack icon, String nameSearch) {
+        boolean matches(String query) {
+            return nameSearch.contains(query) || id.contains(query);
+        }
+    }
+
+    private class BlockList extends ObjectSelectionList<BlockRow> {
+        BlockList(Minecraft minecraft, int width, int height, int y, int itemHeight) {
+            super(minecraft, width, height, y, itemHeight);
+            this.centerListVertically = false;
+        }
+
+        void setRows(List<BlockRow> rows) {
+            replaceEntries(rows);
+        }
+
+        @Override
+        public int getRowWidth() {
+            return this.width - 10;
+        }
+
+        @Override
+        protected int getScrollbarPosition() {
+            return this.getRight() - 6;
+        }
+
+        @Override
+        protected boolean isSelectedItem(int index) {
+            return false;
+        }
+
+        @Override
+        protected void renderListItems(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            int left = this.getRowLeft();
+            int width = this.getRowWidth();
+            int rowHeight = this.itemHeight - 4;
+            int count = this.getItemCount();
+            for (int i = 0; i < count; i++) {
+                int top = this.getRowTop(i);
+                int bottom = this.getRowBottom(i);
+                if (bottom >= this.getY() && bottom <= this.getBottom()) {
+                    this.renderItem(graphics, mouseX, mouseY, partialTick, i, left, top, width, rowHeight);
+                }
+            }
+        }
+    }
+
+    private class BlockRow extends ObjectSelectionList.Entry<BlockRow> {
+        private static final int ICON = 16;
+        private static final int BTN = 18;
+        private static final int CHECK = 17;
+        private static final int NAME_COL = 196;
+        private static final ResourceLocation CHECKBOX = ResourceLocation.withDefaultNamespace("widget/checkbox");
+        private static final ResourceLocation CHECKBOX_HIGHLIGHTED = ResourceLocation.withDefaultNamespace("widget/checkbox_highlighted");
+        private static final ResourceLocation CHECKBOX_SELECTED = ResourceLocation.withDefaultNamespace("widget/checkbox_selected");
+        private static final ResourceLocation CHECKBOX_SELECTED_HIGHLIGHTED = ResourceLocation.withDefaultNamespace("widget/checkbox_selected_highlighted");
+
+        private final BlockInfo info;
+        private int left, top, width, height;
+
+        BlockRow(BlockInfo info) {
+            this.info = info;
+        }
+
+        @Override
+        public Component getNarration() {
+            return this.info.name;
+        }
+
+        @Override
+        public void renderBack(GuiGraphics graphics, int index, int top, int left, int width, int height,
+                               int mouseX, int mouseY, boolean hovering, float partialTick) {
+            if (hovering) {
+                graphics.fill(left - 2, top - 1, left + width - 2, top + height + 1, 0x22FFFFFF);
+            }
+        }
+
+        @Override
+        public void render(GuiGraphics graphics, int index, int top, int left, int width, int height,
+                           int mouseX, int mouseY, boolean hovering, float partialTick) {
+            this.left = left;
+            this.top = top;
+            this.width = width;
+            this.height = height;
+
+            SkyGridConfig cfg = config();
+            boolean inPool = cfg.contains(this.info.id);
+            int textColour = inPool ? 0xFFFFFFFF : 0xFF9A9A9A;
+            int idColour = inPool ? 0xFFA8A8A8 : 0xFF6A6A6A;
+
+            int checkX = left + 2;
+            int checkY = top + (height - CHECK) / 2;
+            boolean overCheck = inside(mouseX, mouseY, checkX, checkY, CHECK, CHECK);
+            ResourceLocation box = inPool
+                ? (overCheck || hovering ? CHECKBOX_SELECTED_HIGHLIGHTED : CHECKBOX_SELECTED)
+                : (overCheck || hovering ? CHECKBOX_HIGHLIGHTED : CHECKBOX);
+            graphics.blitSprite(box, checkX, checkY, CHECK, CHECK);
+
+            int iconX = checkX + CHECK + 6;
+            int iconY = top + (height - ICON) / 2;
+            if (!this.info.icon.isEmpty()) {
+                graphics.renderItem(this.info.icon, iconX, iconY);
+            } else {
+                graphics.fill(iconX, iconY, iconX + ICON, iconY + ICON, 0x33000000);
+            }
+
+            int textX = iconX + ICON + 6;
+            int nameWidth = NAME_COL;
+
+            graphics.drawString(font(),
+                font().plainSubstrByWidth(this.info.name.getString(), nameWidth),
+                textX, top + 2, textColour, false);
+            graphics.drawString(font(),
+                font().plainSubstrByWidth(this.info.id, nameWidth),
+                textX, top + 13, idColour, false);
+
+            if (inPool) {
+                int weight = cfg.getWeight(this.info.id);
+                drawTinyButton(graphics, minusX(), buttonY(), "−", hoveringMinus(mouseX, mouseY));
+                graphics.drawCenteredString(font(), Integer.toString(weight),
+                    weightCentreX(), top + (height - 8) / 2, 0xFFFFFFA0);
+                drawTinyButton(graphics, plusX(), buttonY(), "+", hoveringPlus(mouseX, mouseY));
+            } else {
+                Component add = Component.translatable("screen.skygrid.config.add")
+                    .withStyle(hovering ? ChatFormatting.YELLOW : ChatFormatting.GRAY);
+                graphics.drawString(font(), add,
+                    minusX(), top + (height - 8) / 2, 0xFFFFFFFF, false);
+            }
+        }
+
+        @Override
+        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (button != 0) return false;
+
+            SkyGridConfig cfg = config();
+            boolean inPool = cfg.contains(this.info.id);
+
+            if (inPool && hoveringMinus(mouseX, mouseY)) {
+                int next = Math.max(1, cfg.getWeight(this.info.id) - (Screen.hasShiftDown() ? 10 : 1));
+                cfg.addOrUpdate(this.info.id, next);
+                commit(cfg);
+                return true;
+            }
+            if (inPool && hoveringPlus(mouseX, mouseY)) {
+                int next = Math.min(1000, cfg.getWeight(this.info.id) + (Screen.hasShiftDown() ? 10 : 1));
+                cfg.addOrUpdate(this.info.id, next);
+                commit(cfg);
+                return true;
+            }
+
+            if (inPool) {
+                cfg.remove(this.info.id);
+            } else {
+                cfg.addOrUpdate(this.info.id, 1);
+            }
+            commit(cfg);
+            refreshList(false);
+            return true;
+        }
+
+        private void drawTinyButton(GuiGraphics graphics, int x, int y, String label, boolean hot) {
+            ResourceLocation sprite = ResourceLocation.withDefaultNamespace(
+                hot ? "widget/button_highlighted" : "widget/button");
+            graphics.blitSprite(sprite, x, y, BTN, BTN);
+            graphics.drawCenteredString(font(), label, x + BTN / 2, y + 5, 0xFFFFFFFF);
+        }
+
+        private int buttonY() {
+            return this.top + (this.height - BTN) / 2;
+        }
+
+        private int plusX() {
+            return minusX() + 40;
+        }
+
+        private int minusX() {
+            return this.left + 2 + CHECK + 6 + ICON + 6 + NAME_COL + 12;
+        }
+
+        private int weightCentreX() {
+            return (minusX() + BTN + plusX()) / 2;
+        }
+
+        private boolean hoveringMinus(double mouseX, double mouseY) {
+            return inside(mouseX, mouseY, minusX(), buttonY(), BTN, BTN);
+        }
+
+        private boolean hoveringPlus(double mouseX, double mouseY) {
+            return inside(mouseX, mouseY, plusX(), buttonY(), BTN, BTN);
+        }
+
+        private static boolean inside(double x, double y, int bx, int by, int w, int h) {
+            return x >= bx && x < bx + w && y >= by && y < by + h;
+        }
+
+        private net.minecraft.client.gui.Font font() {
+            return SkyGridConfigScreen.this.font;
         }
     }
 }

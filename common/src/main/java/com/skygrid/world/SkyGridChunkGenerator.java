@@ -140,11 +140,11 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
     private static final Map<String, BlockState[]> DIMENSION_POOLS = new ConcurrentHashMap<>();
 
     public static BlockState[] getPublicBlockPool(String dimension) {
-        return DIMENSION_POOLS.get(dimension);
+        return getBlockPool(dimension);
     }
 
     public static BlockState[] getPublicBlockPool() {
-        return DIMENSION_POOLS.get("overworld");
+        return getBlockPool("overworld");
     }
 
     /** Clears cached pools so they rebuild on next generation — used by /skygrid reload. */
@@ -467,9 +467,31 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                              BiomeManager biomeManager, StructureManager structureManager,
                              ChunkAccess chunk, GenerationStep.Carving carvingStep) {}
 
-    @Override public int getSeaLevel() { return 63;  }
-    @Override public int getGenDepth() { return 384; }
-    @Override public int getMinY()     { return -64; }
+    @Override
+    public int getSeaLevel() {
+        return switch (dimension) {
+            case "nether" -> 32;
+            case "end"    -> 0;
+            default       -> 63;
+        };
+    }
+
+    @Override
+    public int getGenDepth() {
+        return switch (dimension) {
+            case "nether" -> 128;
+            case "end"    -> 256;
+            default       -> 384;
+        };
+    }
+
+    @Override
+    public int getMinY() {
+        return switch (dimension) {
+            case "nether", "end" -> 0;
+            default              -> -64;
+        };
+    }
 
     @Override
     public int getBaseHeight(int x, int z, Heightmap.Types type,
@@ -490,6 +512,10 @@ public class SkyGridChunkGenerator extends ChunkGenerator {
                + " | Spacing: " + gridSpacing
                + " | SeedAware: " + seedAware);
     }
+
+    public int getGridSpacing() { return gridSpacing; }
+    public String getDimension() { return dimension; }
+    public boolean isSeedAware() { return seedAware; }
 
     // -------------------------------------------------------------------------
     // Helpers

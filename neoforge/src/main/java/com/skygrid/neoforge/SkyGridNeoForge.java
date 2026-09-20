@@ -14,6 +14,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
@@ -45,6 +46,9 @@ public class SkyGridNeoForge {
                 SkyGridPlatform.placeIfNeeded(serverLevel);
             }
         });
+
+        NeoForge.EVENT_BUS.addListener((ServerStartedEvent event) ->
+            SkyGridMod.onServerStarted(event.getServer()));
 
         SkyGridMod.LOGGER.info("SkyGrid chunk generator registered (NeoForge).");
     }
