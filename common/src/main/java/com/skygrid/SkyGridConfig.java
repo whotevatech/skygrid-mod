@@ -304,13 +304,73 @@ public class SkyGridConfig {
         return entries.removeIf(e -> e.id().equals(blockId));
     }
 
-    /** Writes the current state back to the file it was loaded from. */
-    public void saveToDisk() {
+    /**
+     * Writes the current state back to the file it was loaded from.
+     *
+     * @return false when there is no file or the write failed. The in-memory
+     *         list is left as the caller set it either way.
+     */
+    public boolean saveToDisk() {
         if (file == null) {
             SkyGridMod.LOGGER.warn("Cannot save {} config — no backing file recorded.", label);
-            return;
+            return false;
         }
-        save(this, file);
+        return save(this, file);
+    }
+
+    /**
+     * Reloads all three dimension files. They are swapped in only when every
+     * file parses. A missing or broken file leaves the running configs as they
+     * were — startup still falls back to defaults, but a reload must not.
+     *
+     * @return null on success, otherwise a short reason for chat and the editor
+     */
+    public static String reloadFromDisk() {
+        Path dir = Services.PLATFORM.getConfigDir();
+        Loaded overworld = readExisting(dir.resolve("skygrid.json").toFile(), "overworld");
+        Loaded nether = readExisting(dir.resolve("skygrid_nether.json").toFile(), "nether");
+        Loaded end = readExisting(dir.resolve("skygrid_end.json").toFile(), "end");
+        List<String> errors = new ArrayList<>();
+        if (overworld.error != null) errors.add(overworld.error);
+        if (nether.error != null) errors.add(nether.error);
+        if (end.error != null) errors.add(end.error);
+        if (!errors.isEmpty()) {
+            String message = String.join("; ", errors);
+            SkyGridMod.LOGGER.warn("SkyGrid reload aborted: {}", message);
+            return message;
+        }
+        overworldInstance = overworld.config;
+        netherInstance = nether.config;
+        endInstance = end.config;
+        SkyGridMod.LOGGER.info("SkyGrid configs reloaded from disk.");
+        return null;
+    }
+
+    private record Loaded(SkyGridConfig config, String error) {}
+
+    private static Loaded readExisting(File file, String label) {
+        if (!file.isFile()) {
+            return new Loaded(null, file.getName() + " is missing");
+        }
+        try (Reader reader = new FileReader(file)) {
+            JsonElement parsed = JsonParser.parseReader(reader);
+            if (!parsed.isJsonObject()) {
+                return new Loaded(null, file.getName() + " is not a JSON object");
+            }
+            SkyGridConfig cfg = fromJson(parsed.getAsJsonObject());
+            cfg.file = file;
+            cfg.label = label;
+            return new Loaded(cfg, null);
+        } catch (Exception e) {
+            SkyGridMod.LOGGER.error("Failed to read {}: {}", file.getName(), e.getMessage());
+            return new Loaded(null, file.getName() + ": " + briefError(e.getMessage()));
+        }
+    }
+
+    private static String briefError(String message) {
+        if (message == null || message.isBlank()) return "could not be read";
+        String oneLine = message.replace('\n', ' ').trim();
+        return oneLine.length() > 140 ? oneLine.substring(0, 137) + "..." : oneLine;
     }
 
     public boolean isAllowed(String blockId) {
@@ -373,41 +433,48 @@ public class SkyGridConfig {
 
     private static SkyGridConfig loadFrom(File file, List<String> defaults) {
         try (Reader reader = new FileReader(file)) {
-            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-            SkyGridConfig cfg = new SkyGridConfig();
-            cfg.mode = json.has("mode") ? json.get("mode").getAsString() : "whitelist";
-            cfg.spawnerChance    = readChance(json, "spawner_chance",     DEFAULT_SPAWNER_CHANCE);
-            cfg.chestChance      = readChance(json, "chest_chance",       DEFAULT_CHEST_CHANCE);
-            cfg.oreClusterChance = readChance(json, "ore_cluster_chance", DEFAULT_ORE_CLUSTER_CHANCE);
-            if (json.has("_comment") && json.get("_comment").isJsonPrimitive()) {
-                cfg.fileComment = json.get("_comment").getAsString();
+            JsonElement parsed = JsonParser.parseReader(reader);
+            if (!parsed.isJsonObject()) {
+                throw new IllegalStateException("not a JSON object");
             }
-            if (json.has("_rates_comment") && json.get("_rates_comment").isJsonPrimitive()) {
-                cfg.ratesComment = json.get("_rates_comment").getAsString();
-            }
-            cfg.entries = new ArrayList<>();
-            String key = "whitelist".equalsIgnoreCase(cfg.mode) ? "whitelist" : "blacklist";
-            if (json.has(key)) {
-                for (JsonElement el : json.getAsJsonArray(key)) {
-                    if (el.isJsonPrimitive()) {
-                        // Plain string — weight defaults to 1
-                        cfg.entries.add(new BlockEntry(el.getAsString()));
-                    } else if (el.isJsonObject()) {
-                        // Weighted object: {"id": "minecraft:stone", "weight": 5}
-                        JsonObject obj = el.getAsJsonObject();
-                        if (!obj.has("id")) continue;
-                        String id = obj.get("id").getAsString();
-                        int weight = obj.has("weight") ? Math.max(1, obj.get("weight").getAsInt()) : 1;
-                        cfg.entries.add(new BlockEntry(id, weight));
-                    }
-                }
-            }
-            return cfg;
+            return fromJson(parsed.getAsJsonObject());
         } catch (Exception e) {
             SkyGridMod.LOGGER.error("Failed to read {} — using defaults. Error: {}",
                 file.getName(), e.getMessage());
             return createDefault(defaults);
         }
+    }
+
+    private static SkyGridConfig fromJson(JsonObject json) {
+        SkyGridConfig cfg = new SkyGridConfig();
+        cfg.mode = json.has("mode") ? json.get("mode").getAsString() : "whitelist";
+        cfg.spawnerChance    = readChance(json, "spawner_chance",     DEFAULT_SPAWNER_CHANCE);
+        cfg.chestChance      = readChance(json, "chest_chance",       DEFAULT_CHEST_CHANCE);
+        cfg.oreClusterChance = readChance(json, "ore_cluster_chance", DEFAULT_ORE_CLUSTER_CHANCE);
+        if (json.has("_comment") && json.get("_comment").isJsonPrimitive()) {
+            cfg.fileComment = json.get("_comment").getAsString();
+        }
+        if (json.has("_rates_comment") && json.get("_rates_comment").isJsonPrimitive()) {
+            cfg.ratesComment = json.get("_rates_comment").getAsString();
+        }
+        cfg.entries = new ArrayList<>();
+        String key = "whitelist".equalsIgnoreCase(cfg.mode) ? "whitelist" : "blacklist";
+        if (json.has(key)) {
+            for (JsonElement el : json.getAsJsonArray(key)) {
+                if (el.isJsonPrimitive()) {
+                    // Plain string — weight defaults to 1
+                    cfg.entries.add(new BlockEntry(el.getAsString()));
+                } else if (el.isJsonObject()) {
+                    // Weighted object: {"id": "minecraft:stone", "weight": 5}
+                    JsonObject obj = el.getAsJsonObject();
+                    if (!obj.has("id")) continue;
+                    String id = obj.get("id").getAsString();
+                    int weight = obj.has("weight") ? Math.max(1, obj.get("weight").getAsInt()) : 1;
+                    cfg.entries.add(new BlockEntry(id, weight));
+                }
+            }
+        }
+        return cfg;
     }
 
     /** Reads a 0..1 chance, clamped, falling back to the default if absent or malformed. */
@@ -424,7 +491,7 @@ public class SkyGridConfig {
         }
     }
 
-    private static void save(SkyGridConfig cfg, File file) {
+    private static boolean save(SkyGridConfig cfg, File file) {
         try {
             file.getParentFile().mkdirs();
             Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
@@ -454,8 +521,10 @@ public class SkyGridConfig {
                 gson.toJson(json, writer);
             }
             SkyGridMod.LOGGER.info("Config written to {}", file.getPath());
+            return true;
         } catch (Exception e) {
             SkyGridMod.LOGGER.error("Failed to write config: {}", e.getMessage());
+            return false;
         }
     }
 }
