@@ -24,7 +24,7 @@ Inspired by the classic SkyGrid map by SethBling.
 - **Ore clusters** — ores occasionally generate as 2×2×2 or 3×3×3 veins instead of single blocks
 - **Smart plant placement** — saplings get dirt, cactus gets sand, nether fungi get matching nylium, Mystical Agriculture seeds get farmland
 - **Starter platform** — a 5×5 platform at spawn so you don't begin the game falling
-- **In-game editor** — add and remove blocks and tune weights from a GUI, no file editing
+- **In-game editor** — dimension tabs, search, and aligned weight controls, saved straight to the JSON configs
 - **Commands** — full block-pool control with tab completion over every registered block
 
 ---
@@ -124,9 +124,17 @@ Open it with **`/skygridgui`**, or the config button:
 - **NeoForge** — Mods screen → WT Sky Grid → config icon
 - **Fabric** — ModMenu → WT Sky Grid → config icon
 
-The editor gives you a dimension selector, a search box that matches block names *and* mod IDs, an "All blocks / In this pool" filter, click-to-add rows, and `−`/`+` weight controls. Hover a name for its block ID.
+The editor is one centered column, the same on both loaders:
 
-Changes save immediately.
+- **Overworld / Nether / End** tabs. Left and right change the tab while that bar is focused. Ctrl+F (Cmd+F) jumps to search.
+- Search matches block names, ids and mod ids (`thermal`, `minecraft:stone`).
+- **Listed** shows only saved entries. **All blocks** shows everything you can add.
+- A checkbox or **Add** puts a block on the list. **− / +** set its weight. Shift-click changes the weight by 10. Removing a listed block asks you to click **Remove**.
+- Tags and ids that are not registered stay in a section at the top, so they can still be edited.
+- The line under the search box is the save state. Edits write to disk immediately and apply to **newly generated chunks only**. A blacklist is shown in amber, because listed blocks are excluded. Weight buttons are hidden in that mode — weights are not used.
+- **Reload** reads the three JSON files again, after a confirmation. If one of them cannot be parsed, nothing is changed and the line turns red.
+
+`/skygrid reload` follows the same rule and repeats it in chat.
 
 ---
 
@@ -220,6 +228,16 @@ Run the game in a dev environment with:
 ```
 
 ---
+
+## 📈 Upgrading from 2.3.1
+
+2.4.0 rebuilds the in-game editor. Worlds, JSON configs, commands and world
+generation are unchanged, and both loaders get the same screen.
+
+`/skygrid reload` (and the editor's Reload button) no longer substitutes the
+default pool when a file is missing or invalid. The running lists stay as
+they were and the error is reported. A bad file at startup still falls back
+to defaults so the game can boot.
 
 ## 📈 Upgrading from 2.3.0
 

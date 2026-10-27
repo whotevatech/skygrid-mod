@@ -490,11 +490,18 @@ public final class SkyGridCommands {
     // -------------------------------------------------------------------------
 
     private static int reloadConfig(CommandSourceStack source) {
-        SkyGridConfig.loadAll();
+        String error = SkyGridConfig.reloadFromDisk();
+        if (error != null) {
+            source.sendFailure(Component.translatable("command.skygrid.reload.fail", error)
+                .withStyle(ChatFormatting.RED));
+            return 0;
+        }
         SkyGridChunkGenerator.clearPools();
         source.sendSuccess(() -> prefix().append(
             Component.translatable("command.skygrid.reload.success").withStyle(ChatFormatting.WHITE)
         ), true);
+        source.sendSuccess(() -> Component.translatable("command.skygrid.chunk_note")
+            .withStyle(ChatFormatting.GRAY), false);
         SkyGridMod.LOGGER.info("SkyGrid configs reloaded via command.");
         return 1;
     }
